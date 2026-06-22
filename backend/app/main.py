@@ -1,4 +1,6 @@
 from fastapi import FastAPI
+
+from backend.app.api.documents import router as documents_router
 from backend.app.api.health import router as health_router
 from backend.app.config import settings
 from backend.app.logging_config import configure_logging, get_logger
@@ -13,6 +15,7 @@ app = FastAPI(
 )
 
 app.include_router(health_router, prefix=settings.api_prefix)
+app.include_router(documents_router, prefix=settings.api_prefix)
 
 logger.info(
     "%s initialized in %s mode",
