@@ -6,7 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.connection import get_db
-from backend.app.database.models import Run, TraceStep
+from backend.app.database.models import EvaluationResult, Run, TraceStep
+from backend.app.evaluation.answer_evaluator import EvaluationError, evaluate_rag_run
+
 
 router = APIRouter(
     prefix="/runs",
@@ -54,6 +56,24 @@ class TraceStepResponse(BaseModel):
     error_message: Optional[str]
     created_at: datetime
 
+class MetricResponse(BaseModel):
+    metric_name: str
+    metric_value: float
+    details: dict[str, Any]
+
+class RunEvaluationResponse(BaseModel):
+    run_id: str
+    evaluator_type: str
+    metrics: list[MetricResponse]
+
+class EvaluationResultResponse(BaseModel):
+    id: str
+    run_id: str
+    metric_name: str
+    metric_value: float
+    evaluator_type: str
+    details_json: dict[str, Any]
+    created_at: datetime
 
 def get_run_or_404(run_id: str, db: Session) -> Run:
     run = db.get(Run, run_id)
@@ -161,4 +181,61 @@ def get_run_trace(
             created_at=step.created_at
         )
         for step in trace_steps
+    ]
+
+@router.post("/{run_id}/evaluate", response_model=RunEvaluationResponse)
+def evaluate_run(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    get_run_or_404(run_id, db)
+
+    try:
+        summary = evaluate_rag_run(db=db, run_id=run_id, persist=True)
+
+        return RunEvaluationResponse(
+            run_id=summary.run_id,
+            evaluator_type=summary.evaluator_type,
+            metrics=[
+                MetricResponse(
+                    metric_name=metric.metric_name,
+                    metric_value=metric.metric_value,
+                    details=metric.details
+                )
+                for metric in summary.metrics
+            ]
+        )
+
+    except EvaluationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+
+@router.get("/{run_id}/evaluations", response_model=list[EvaluationResultResponse])
+def get_run_evaluations(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    get_run_or_404(run_id, db)
+
+    statement = (
+        select(EvaluationResult)
+        .where(EvaluationResult.run_id == run_id)
+        .order_by(EvaluationResult.metric_name.asc())
+    )
+
+    evaluation_results = db.execute(statement).scalars().all()
+
+    return [
+        EvaluationResultResponse(
+            id=result.id,
+            run_id=result.run_id,
+            metric_name=result.metric_name,
+            metric_value=result.metric_value,
+            evaluator_type=result.evaluator_type,
+            details_json=result.details_json,
+            created_at=result.created_at
+        )
+        for result in evaluation_results
     ]
