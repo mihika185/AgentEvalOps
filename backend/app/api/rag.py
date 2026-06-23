@@ -1,17 +1,19 @@
-from typing import Any, Optional
-
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from backend.app.config import settings
-from backend.app.rag.answer_service import RAGAnswerError, answer_question
-
+from backend.app.database.connection import get_db
+from backend.app.rag.workflow_service import (
+    RAGWorkflowError,
+    run_rag_answer_workflow,
+)
 
 router = APIRouter(
     prefix="/rag",
     tags=["RAG"]
 )
-
 
 class RAGAnswerRequest(BaseModel):
     query: str = Field(..., min_length=1)
@@ -22,7 +24,6 @@ class RAGAnswerRequest(BaseModel):
     )
     document_id: Optional[str] = None
 
-
 class SourceChunkResponse(BaseModel):
     chunk_id: str
     document_id: str
@@ -30,26 +31,31 @@ class SourceChunkResponse(BaseModel):
     text: str
     metadata: dict[str, Any]
 
-
 class RAGAnswerResponse(BaseModel):
+    run_id: str
     query: str
     answer: str
     source_chunks: list[SourceChunkResponse]
     retrieval_top_k: int
     document_id: Optional[str]
     answer_generator: str
-
+    total_latency_ms: int
 
 @router.post("/answer", response_model=RAGAnswerResponse)
-def generate_rag_answer(payload: RAGAnswerRequest):
+def generate_rag_answer(
+    payload: RAGAnswerRequest,
+    db: Annotated[Session, Depends(get_db)]
+):
     try:
-        result = answer_question(
+        result = run_rag_answer_workflow(
+            db=db,
             query=payload.query,
             top_k=payload.top_k,
             document_id=payload.document_id
         )
 
         return RAGAnswerResponse(
+            run_id=result.run_id,
             query=result.query,
             answer=result.answer,
             source_chunks=[
@@ -64,10 +70,11 @@ def generate_rag_answer(payload: RAGAnswerRequest):
             ],
             retrieval_top_k=result.retrieval_top_k,
             document_id=result.document_id,
-            answer_generator=result.answer_generator
+            answer_generator=result.answer_generator,
+            total_latency_ms=result.total_latency_ms
         )
 
-    except RAGAnswerError as exc:
+    except RAGWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc)
