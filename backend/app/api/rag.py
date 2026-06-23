@@ -49,6 +49,7 @@ class RAGAnswerResponse(BaseModel):
     quality_gate_passed: bool
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
+    response_blocked_by_quality_gate: bool
 
 @router.post("/answer", response_model=RAGAnswerResponse)
 def generate_rag_answer(
@@ -91,7 +92,8 @@ def generate_rag_answer(
             ],
             quality_gate_passed=result.quality_gate_passed,
             quality_gate_pass_rate=result.quality_gate_pass_rate,
-            failed_quality_gates=result.failed_quality_gates
+            failed_quality_gates=result.failed_quality_gates,
+            response_blocked_by_quality_gate=result.response_blocked_by_quality_gate
         )
 
     except RAGWorkflowError as exc:

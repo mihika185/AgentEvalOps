@@ -44,6 +44,7 @@ class ObservableRAGAnswerResult:
     quality_gate_passed: bool
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
+    response_blocked_by_quality_gate: bool
 
 
 def run_rag_answer_workflow(
@@ -57,10 +58,8 @@ def run_rag_answer_workflow(
 
     if not cleaned_query:
         raise RAGWorkflowError("Query cannot be empty")
-
     if top_k <= 0:
         raise RAGWorkflowError("top_k must be greater than 0")
-
     if top_k > settings.max_retrieval_top_k:
         raise RAGWorkflowError(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
@@ -257,23 +256,29 @@ def run_rag_answer_workflow(
             if not check.passed
         ]
 
+        response_blocked_by_quality_gate = not quality_gate_summary.overall_passed
+
+        final_answer = answer
+
+        if response_blocked_by_quality_gate:
+            final_answer = build_quality_gate_fallback_answer()
+
         record_trace_step(
             db=db,
             run_id=run_id,
-            step_index=3,
-            step_type="quality_gate",
-            name="evaluate_quality_gates",
+            step_index=4,
+            step_type="response_finalization",
+            name="apply_quality_gate_response_policy",
             input_data={
-                "run_id": run_id
-            },
-            output_data={
-                "overall_passed": quality_gate_summary.overall_passed,
-                "passed_count": quality_gate_summary.passed_count,
-                "failed_count": quality_gate_summary.failed_count,
-                "pass_rate": quality_gate_summary.pass_rate,
+                "quality_gate_passed": quality_gate_summary.overall_passed,
                 "failed_quality_gates": failed_quality_gates
             },
-            latency_ms=quality_gate_latency_ms
+            output_data={
+                "raw_generated_answer": answer,
+                "final_answer": final_answer,
+                "response_blocked_by_quality_gate": response_blocked_by_quality_gate
+            },
+            latency_ms=0
         )
 
         total_latency_ms = elapsed_ms(total_start)
@@ -281,7 +286,7 @@ def run_rag_answer_workflow(
         complete_run(
             db=db,
             run_id=run_id,
-            output_answer=answer,
+            output_answer=final_answer,
             latency_ms=total_latency_ms,
             metadata={
                 "document_id": document_id,
@@ -294,7 +299,9 @@ def run_rag_answer_workflow(
                 "quality_gate_latency_ms": quality_gate_latency_ms,
                 "quality_gate_passed": quality_gate_summary.overall_passed,
                 "quality_gate_pass_rate": quality_gate_summary.pass_rate,
-                "failed_quality_gates": failed_quality_gates
+                "failed_quality_gates": failed_quality_gates,
+                "raw_generated_answer": answer,
+                "response_blocked_by_quality_gate": response_blocked_by_quality_gate,
             }
         )
 
@@ -307,7 +314,7 @@ def run_rag_answer_workflow(
         return ObservableRAGAnswerResult(
             run_id=run_id,
             query=cleaned_query,
-            answer=answer,
+            answer=final_answer,
             source_chunks=source_chunks,
             retrieval_top_k=top_k,
             document_id=document_id,
@@ -316,7 +323,8 @@ def run_rag_answer_workflow(
             evaluation_metrics=evaluation_summary.metrics,
             quality_gate_passed=quality_gate_summary.overall_passed,
             quality_gate_pass_rate=quality_gate_summary.pass_rate,
-            failed_quality_gates=failed_quality_gates
+            failed_quality_gates=failed_quality_gates,
+            response_blocked_by_quality_gate=response_blocked_by_quality_gate
         )
 
     except (RetrievalError, RunRecorderError, QualityGateError) as exc:
@@ -367,3 +375,9 @@ def mark_run_failed_safely(
         )
     except Exception:
         logger.exception("Failed to mark run as failed: %s", run_id)
+
+def build_quality_gate_fallback_answer() -> str:
+    return (
+        "I could not find enough reliable evidence in the provided documents "
+        "to answer this confidently."
+    )

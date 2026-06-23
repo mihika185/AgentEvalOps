@@ -36,18 +36,21 @@ def evaluate_rag_run(
 
     if run is None:
         raise EvaluationError(f"Run with id '{run_id}' was not found")
-
     if run.workflow_type != "rag_answer":
         raise EvaluationError(
             f"Run '{run_id}' has unsupported workflow_type '{run.workflow_type}'"
         )
-
     if run.status != "completed":
         raise EvaluationError(
             f"Run '{run_id}' must be completed before evaluation"
         )
+    generated_answer = get_generated_answer_for_evaluation(
+        db=db,
+        run_id=run_id,
+        run=run
+    )
 
-    if not run.output_answer:
+    if not generated_answer:
         raise EvaluationError(f"Run '{run_id}' has no answer to evaluate")
 
     retrieval_step = get_trace_step(db, run_id, "retrieval")
@@ -69,7 +72,7 @@ def evaluate_rag_run(
     source_text = "\n\n".join(chunk.chunk_text for chunk in source_chunks)
 
     metrics = build_metrics(
-        answer=run.output_answer,
+        answer=generated_answer,
         source_text=source_text,
         source_chunks=source_chunks,
         retrieved_scores=retrieved_scores
@@ -123,6 +126,28 @@ def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
         for chunk_id in chunk_ids
         if chunk_id in chunk_by_id
     ]
+
+def get_generated_answer_for_evaluation(
+    db: Session,
+    run_id: str,
+    run: Run
+) -> Optional[str]:
+    answer_step = db.execute(
+        select(TraceStep)
+        .where(
+            TraceStep.run_id == run_id,
+            TraceStep.step_type == "answer_generation"
+        )
+        .order_by(TraceStep.step_index.asc())
+    ).scalars().first()
+
+    if answer_step is not None:
+        answer = answer_step.output_data.get("answer")
+
+        if answer:
+            return str(answer)
+
+    return run.output_answer
 
 def build_metrics(
     answer: str,
