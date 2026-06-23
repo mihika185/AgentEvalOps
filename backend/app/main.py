@@ -7,6 +7,7 @@ from backend.app.api.rag import router as rag_router
 from backend.app.api.retrieval import router as retrieval_router
 from backend.app.config import settings
 from backend.app.logging_config import configure_logging, get_logger
+from backend.app.api.runs import router as runs_router
 
 configure_logging()
 logger = get_logger(__name__)
@@ -22,6 +23,7 @@ app.include_router(documents_router, prefix=settings.api_prefix)
 app.include_router(chunks_router, prefix=settings.api_prefix)
 app.include_router(retrieval_router, prefix=settings.api_prefix)
 app.include_router(rag_router, prefix=settings.api_prefix)
+app.include_router(runs_router, prefix=settings.api_prefix)
 
 logger.info(
     "%s initialized in %s mode",
