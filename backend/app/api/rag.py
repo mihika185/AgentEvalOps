@@ -31,6 +31,11 @@ class SourceChunkResponse(BaseModel):
     text: str
     metadata: dict[str, Any]
 
+class EvaluationMetricResponse(BaseModel):
+    metric_name: str
+    metric_value: float
+    details: dict[str, Any]
+
 class RAGAnswerResponse(BaseModel):
     run_id: str
     query: str
@@ -40,6 +45,10 @@ class RAGAnswerResponse(BaseModel):
     document_id: Optional[str]
     answer_generator: str
     total_latency_ms: int
+    evaluation_metrics: list[EvaluationMetricResponse]
+    quality_gate_passed: bool
+    quality_gate_pass_rate: float
+    failed_quality_gates: list[str]
 
 @router.post("/answer", response_model=RAGAnswerResponse)
 def generate_rag_answer(
@@ -71,7 +80,18 @@ def generate_rag_answer(
             retrieval_top_k=result.retrieval_top_k,
             document_id=result.document_id,
             answer_generator=result.answer_generator,
-            total_latency_ms=result.total_latency_ms
+            total_latency_ms=result.total_latency_ms,
+            evaluation_metrics=[
+                EvaluationMetricResponse(
+                    metric_name=metric.metric_name,
+                    metric_value=metric.metric_value,
+                    details=metric.details
+                )
+                for metric in result.evaluation_metrics
+            ],
+            quality_gate_passed=result.quality_gate_passed,
+            quality_gate_pass_rate=result.quality_gate_pass_rate,
+            failed_quality_gates=result.failed_quality_gates
         )
 
     except RAGWorkflowError as exc:

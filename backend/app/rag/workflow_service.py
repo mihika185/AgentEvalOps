@@ -19,6 +19,8 @@ from backend.app.rag.answer_service import (
     SourceChunk,
 )
 from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_relevant_chunks
+from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
+from backend.app.evaluation.quality_gates import QualityGateError, evaluate_quality_gates
 
 
 logger = get_logger(__name__)
@@ -38,6 +40,10 @@ class ObservableRAGAnswerResult:
     document_id: Optional[str]
     answer_generator: str
     total_latency_ms: int
+    evaluation_metrics: list[MetricResult]
+    quality_gate_passed: bool
+    quality_gate_pass_rate: float
+    failed_quality_gates: list[str]
 
 
 def run_rag_answer_workflow(
@@ -202,6 +208,96 @@ def run_rag_answer_workflow(
             }
         )
 
+        evaluation_start = time.perf_counter()
+
+        evaluation_summary = evaluate_rag_run(
+            db=db,
+            run_id=run_id,
+            persist=True
+        )
+
+        evaluation_latency_ms = elapsed_ms(evaluation_start)
+
+        record_trace_step(
+            db=db,
+            run_id=run_id,
+            step_index=2,
+            step_type="evaluation",
+            name=evaluation_summary.evaluator_type,
+            input_data={
+                "run_id": run_id
+            },
+            output_data={
+                "metrics": [
+                    {
+                        "metric_name": metric.metric_name,
+                        "metric_value": metric.metric_value,
+                        "details": metric.details
+                    }
+                    for metric in evaluation_summary.metrics
+                ],
+                "metric_count": len(evaluation_summary.metrics)
+            },
+            latency_ms=evaluation_latency_ms
+        )
+
+        quality_gate_start = time.perf_counter()
+
+        quality_gate_summary = evaluate_quality_gates(
+            db=db,
+            run_id=run_id,
+            persist=True
+        )
+
+        quality_gate_latency_ms = elapsed_ms(quality_gate_start)
+
+        failed_quality_gates = [
+            check.gate_name
+            for check in quality_gate_summary.checks
+            if not check.passed
+        ]
+
+        record_trace_step(
+            db=db,
+            run_id=run_id,
+            step_index=3,
+            step_type="quality_gate",
+            name="evaluate_quality_gates",
+            input_data={
+                "run_id": run_id
+            },
+            output_data={
+                "overall_passed": quality_gate_summary.overall_passed,
+                "passed_count": quality_gate_summary.passed_count,
+                "failed_count": quality_gate_summary.failed_count,
+                "pass_rate": quality_gate_summary.pass_rate,
+                "failed_quality_gates": failed_quality_gates
+            },
+            latency_ms=quality_gate_latency_ms
+        )
+
+        total_latency_ms = elapsed_ms(total_start)
+
+        complete_run(
+            db=db,
+            run_id=run_id,
+            output_answer=answer,
+            latency_ms=total_latency_ms,
+            metadata={
+                "document_id": document_id,
+                "retrieval_top_k": top_k,
+                "source_chunk_count": len(source_chunks),
+                "answer_generator": generator.generator_name,
+                "retrieval_latency_ms": retrieval_latency_ms,
+                "answer_generation_latency_ms": answer_latency_ms,
+                "evaluation_latency_ms": evaluation_latency_ms,
+                "quality_gate_latency_ms": quality_gate_latency_ms,
+                "quality_gate_passed": quality_gate_summary.overall_passed,
+                "quality_gate_pass_rate": quality_gate_summary.pass_rate,
+                "failed_quality_gates": failed_quality_gates
+            }
+        )
+
         logger.info(
             "Completed observable RAG workflow %s in %sms",
             run_id,
@@ -216,10 +312,14 @@ def run_rag_answer_workflow(
             retrieval_top_k=top_k,
             document_id=document_id,
             answer_generator=generator.generator_name,
-            total_latency_ms=total_latency_ms
+            total_latency_ms=total_latency_ms,
+            evaluation_metrics=evaluation_summary.metrics,
+            quality_gate_passed=quality_gate_summary.overall_passed,
+            quality_gate_pass_rate=quality_gate_summary.pass_rate,
+            failed_quality_gates=failed_quality_gates
         )
 
-    except (RetrievalError, RunRecorderError) as exc:
+    except (RetrievalError, RunRecorderError, QualityGateError) as exc:
         mark_run_failed_safely(
             db=db,
             run_id=run_id,
