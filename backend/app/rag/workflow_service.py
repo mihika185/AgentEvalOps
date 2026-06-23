@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.config import settings
 from backend.app.logging_config import get_logger
+from backend.app.database.models import Document
 from backend.app.observability.run_recorder import (
     RunRecorderError,
     complete_run,
@@ -75,6 +76,35 @@ def run_rag_answer_workflow(
         )
 
         run_id = run.run_id
+
+        if document_id is not None and db.get(Document, document_id) is None:
+            error_message = f"Document with id '{document_id}' was not found"
+
+            record_trace_step(
+                db=db,
+                run_id=run_id,
+                step_index=0,
+                step_type="validation",
+                name="validate_document_scope",
+                input_data={
+                    "document_id": document_id
+                },
+                output_data={},
+                status="failed",
+                error_message=error_message
+            )
+
+            fail_run(
+                db=db,
+                run_id=run_id,
+                error_message=error_message,
+                latency_ms=elapsed_ms(total_start),
+                metadata={
+                    "failure_stage": "document_validation"
+                }
+            )
+
+            raise RAGWorkflowError(error_message)
 
         retrieval_start = time.perf_counter()
 
@@ -198,6 +228,9 @@ def run_rag_answer_workflow(
         )
 
         raise RAGWorkflowError(str(exc)) from exc
+    
+    except RAGWorkflowError:
+        raise
 
     except Exception as exc:
         logger.exception("Unexpected observable RAG workflow failure")
