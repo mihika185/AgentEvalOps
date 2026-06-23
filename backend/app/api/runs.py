@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from backend.app.database.connection import get_db
 from backend.app.database.models import EvaluationResult, Run, TraceStep
 from backend.app.evaluation.answer_evaluator import EvaluationError, evaluate_rag_run
+from backend.app.evaluation.quality_gates import (
+    QUALITY_GATE_EVALUATOR_TYPE,
+    QualityGateError,
+    evaluate_quality_gates,
+)
 
 
 router = APIRouter(
@@ -74,6 +79,24 @@ class EvaluationResultResponse(BaseModel):
     evaluator_type: str
     details_json: dict[str, Any]
     created_at: datetime
+
+class QualityGateCheckResponse(BaseModel):
+    gate_id: str
+    gate_name: str
+    metric_name: str
+    metric_value: float
+    operator: str
+    threshold: float
+    passed: bool
+
+class QualityGateRunResponse(BaseModel):
+    run_id: str
+    overall_passed: bool
+    passed_count: int
+    failed_count: int
+    total_gates: int
+    pass_rate: float
+    checks: list[QualityGateCheckResponse]
 
 def get_run_or_404(run_id: str, db: Session) -> Run:
     run = db.get(Run, run_id)
@@ -238,4 +261,76 @@ def get_run_evaluations(
             created_at=result.created_at
         )
         for result in evaluation_results
+    ]
+
+@router.post("/{run_id}/quality-gates/evaluate", response_model=QualityGateRunResponse)
+def evaluate_run_quality_gates(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    get_run_or_404(run_id, db)
+
+    try:
+        summary = evaluate_quality_gates(
+            db=db,
+            run_id=run_id,
+            persist=True
+        )
+
+        return QualityGateRunResponse(
+            run_id=summary.run_id,
+            overall_passed=summary.overall_passed,
+            passed_count=summary.passed_count,
+            failed_count=summary.failed_count,
+            total_gates=summary.total_gates,
+            pass_rate=summary.pass_rate,
+            checks=[
+                QualityGateCheckResponse(
+                    gate_id=check.gate_id,
+                    gate_name=check.gate_name,
+                    metric_name=check.metric_name,
+                    metric_value=check.metric_value,
+                    operator=check.operator,
+                    threshold=check.threshold,
+                    passed=check.passed
+                )
+                for check in summary.checks
+            ]
+        )
+
+    except QualityGateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+
+@router.get("/{run_id}/quality-gates", response_model=list[EvaluationResultResponse])
+def get_run_quality_gate_results(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    get_run_or_404(run_id, db)
+
+    statement = (
+        select(EvaluationResult)
+        .where(
+            EvaluationResult.run_id == run_id,
+            EvaluationResult.evaluator_type == QUALITY_GATE_EVALUATOR_TYPE
+        )
+        .order_by(EvaluationResult.metric_name.asc())
+    )
+
+    quality_gate_results = db.execute(statement).scalars().all()
+
+    return [
+        EvaluationResultResponse(
+            id=result.id,
+            run_id=result.run_id,
+            metric_name=result.metric_name,
+            metric_value=result.metric_value,
+            evaluator_type=result.evaluator_type,
+            details_json=result.details_json,
+            created_at=result.created_at
+        )
+        for result in quality_gate_results
     ]
