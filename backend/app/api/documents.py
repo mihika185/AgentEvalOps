@@ -1,17 +1,28 @@
+import tempfile
+from pathlib import Path
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.connection import get_db
 from backend.app.database.models import Document
 from backend.app.database.schemas import DocumentCreate, DocumentRead, DocumentUpdate
+from backend.app.ingestion.ingestion_service import IngestionError, ingest_document_file
+from backend.app.indexing.indexing_service import IndexingError, index_document_chunks
 from backend.app.logging_config import get_logger
 
 router = APIRouter(
     prefix="/documents",
     tags=["Documents"]
 )
+
+class UploadedIndexedDocumentResponse(DocumentRead):
+    indexed_chunks: int
+    vector_collection: str
+    embedding_provider: str
+    embedding_model: str
+    embedding_dimension: int
 
 logger = get_logger(__name__)
 
@@ -61,6 +72,79 @@ def list_documents(
     documents = db.execute(statement).scalars().all()
 
     return documents
+
+@router.post(
+    "/upload-and-index",
+    response_model=UploadedIndexedDocumentResponse,
+    status_code=status.HTTP_201_CREATED
+)
+async def upload_and_index_document(
+    db: Annotated[Session, Depends(get_db)],
+    file: UploadFile = File(...)
+):
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file must have a filename"
+        )
+
+    suffix = Path(file.filename).suffix.lower()
+
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_path = Path(temp_file.name)
+            content = await file.read()
+            temp_file.write(content)
+
+        ingestion_result = ingest_document_file(
+            file_path=temp_path,
+            db=db
+        )
+
+        indexing_result = index_document_chunks(
+            document_id=ingestion_result.document_id,
+            db=db
+        )
+
+        document = get_document_or_404(
+            document_id=ingestion_result.document_id,
+            db=db
+        )
+
+        return UploadedIndexedDocumentResponse(
+            id=document.id,
+            filename=file.filename,
+            file_type=document.file_type,
+            status=document.status,
+            num_pages=document.num_pages,
+            num_chunks=document.num_chunks,
+            metadata_json=document.metadata_json,
+            created_at=document.created_at,
+            updated_at=document.updated_at,
+            indexed_chunks=indexing_result.indexed_chunks,
+            vector_collection=indexing_result.collection_name,
+            embedding_provider=indexing_result.embedding_provider,
+            embedding_model=indexing_result.embedding_model,
+            embedding_dimension=indexing_result.embedding_dimension
+        )
+
+    except IngestionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc)
+        ) from exc
+
+    except IndexingError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc)
+        ) from exc
+
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 @router.get("/{document_id}", response_model=DocumentRead)
 def get_document(

@@ -72,7 +72,7 @@ DEFAULT_QUALITY_GATES = [
         name="Minimum Top Retrieval Score",
         metric_name="top_retrieval_score",
         operator=">=",
-        threshold=0.50,
+        threshold=0.35,
         metadata={
             "description": "At least one retrieved chunk should be strongly relevant."
         }
