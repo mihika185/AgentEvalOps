@@ -29,6 +29,8 @@ class Settings(BaseSettings):
 
     default_llm_provider: str = "mock"
     default_llm_model: str = "mock-llm"
+    
+    default_embedding_provider: Literal["hash", "sentence-transformers"] = "sentence-transformers"
     default_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     openai_api_key: Optional[str] = None

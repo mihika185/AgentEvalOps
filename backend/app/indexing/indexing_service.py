@@ -4,13 +4,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.models import Document, DocumentChunk
-from backend.app.embeddings.embedding_provider import (
+from backend.app.embeddings.embedding_provider import(
     EmbeddingError,
     EmbeddingProvider,
-    HashEmbeddingProvider,
+    get_default_embedding_provider,
 )
 from backend.app.logging_config import get_logger
-from backend.app.vector_store.qdrant_store import (
+from backend.app.vector_store.qdrant_store import(
     ChunkEmbedding,
     QdrantStore,
     VectorStoreError,
@@ -41,7 +41,7 @@ def index_document_chunks(
     if batch_size <= 0:
         raise IndexingError("batch_size must be greater than 0")
 
-    provider = embedding_provider or HashEmbeddingProvider()
+    provider = embedding_provider or get_default_embedding_provider()
     store = vector_store or QdrantStore(vector_size=provider.dimension)
 
     document = db.get(Document, document_id)

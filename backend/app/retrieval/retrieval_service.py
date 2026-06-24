@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.app.config import settings
-from backend.app.embeddings.embedding_provider import (
+from backend.app.embeddings.embedding_provider import(
     EmbeddingError,
     EmbeddingProvider,
-    HashEmbeddingProvider,
+    get_default_embedding_provider,
 )
 from backend.app.logging_config import get_logger
 from backend.app.vector_store.qdrant_store import QdrantStore, VectorStoreError
@@ -54,7 +54,7 @@ def retrieve_relevant_chunks(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
         )
 
-    provider = embedding_provider or HashEmbeddingProvider()
+    provider = embedding_provider or get_default_embedding_provider()
     store = vector_store or QdrantStore(vector_size=provider.dimension)
 
     try:
