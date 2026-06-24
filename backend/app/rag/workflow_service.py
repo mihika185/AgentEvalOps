@@ -13,11 +13,8 @@ from backend.app.observability.run_recorder import (
     fail_run,
     record_trace_step,
 )
-from backend.app.rag.answer_service import (
-    AnswerGenerator,
-    SimpleExtractiveAnswerGenerator,
-    SourceChunk,
-)
+from backend.app.rag.answer_service import AnswerGenerator, SourceChunk
+from backend.app.rag.llm_answer_generator import get_default_answer_generator
 from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_relevant_chunks
 from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
 from backend.app.evaluation.quality_gates import QualityGateError, evaluate_quality_gates
@@ -150,7 +147,7 @@ def run_rag_answer_workflow(
             latency_ms=retrieval_latency_ms
         )
 
-        generator = answer_generator or SimpleExtractiveAnswerGenerator()
+        generator = answer_generator or get_default_answer_generator()
 
         answer_start = time.perf_counter()
 

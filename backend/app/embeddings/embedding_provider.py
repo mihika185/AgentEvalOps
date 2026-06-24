@@ -9,6 +9,7 @@ from typing import Optional, Protocol
 class EmbeddingError(Exception):
     pass
 
+
 @dataclass(frozen=True)
 class EmbeddingResult:
     text: str
@@ -16,6 +17,7 @@ class EmbeddingResult:
     provider: str
     model: str
     dimension: int
+
 
 class EmbeddingProvider(Protocol):
     provider_name: str
@@ -27,6 +29,7 @@ class EmbeddingProvider(Protocol):
 
     def embed_batch(self, texts: list[str]) -> list[EmbeddingResult]:
         ...
+
 
 class HashEmbeddingProvider:
     provider_name = "hash"
@@ -79,7 +82,8 @@ class SentenceTransformerEmbeddingProvider:
         except ImportError as exc:
             raise EmbeddingError(
                 "sentence-transformers is not installed. "
-                "Install it with: python3 -m pip install sentence-transformers"
+                "Install it with: python3 -m pip install "
+                "\"sentence-transformers>=3.0.0,<4.0.0\""
             ) from exc
 
         self.model = SentenceTransformer(model_name)
@@ -152,6 +156,7 @@ class SentenceTransformerEmbeddingProvider:
 
         return results
 
+
 @lru_cache(maxsize=4)
 def get_embedding_provider(
     provider_name: str,
@@ -169,6 +174,7 @@ def get_embedding_provider(
 
     raise EmbeddingError(f"Unsupported embedding provider: {provider_name}")
 
+
 def get_default_embedding_provider() -> EmbeddingProvider:
     from backend.app.config import settings
 
@@ -176,6 +182,7 @@ def get_default_embedding_provider() -> EmbeddingProvider:
         provider_name=settings.default_embedding_provider,
         model_name=settings.default_embedding_model
     )
+
 
 def tokenize_text(text: str) -> list[str]:
     return re.findall(r"[a-zA-Z0-9]+", text.lower())
