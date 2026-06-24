@@ -60,6 +60,15 @@ DEFAULT_QUALITY_GATES = [
         }
     ),
     DefaultQualityGate(
+        name="Minimum Query Answer Relevance",
+        metric_name="query_answer_relevance_score",
+        operator=">=",
+        threshold=0.60,
+        metadata={
+            "description": "Answer should directly address the user's query."
+        }
+    ),
+    DefaultQualityGate(
         name="Maximum Hallucination Risk",
         metric_name="hallucination_risk",
         operator="<=",
@@ -74,7 +83,8 @@ DEFAULT_QUALITY_GATES = [
         operator=">=",
         threshold=0.35,
         metadata={
-            "description": "At least one retrieved chunk should be strongly relevant."
+            "description": "At least one retrieved chunk should be relevant enough for the current embedding model.",
+            "calibrated_for": "sentence-transformers/all-MiniLM-L6-v2"
         }
     ),
     DefaultQualityGate(

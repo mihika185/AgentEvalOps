@@ -103,6 +103,25 @@ async def upload_and_index_document(
             db=db
         )
 
+        document = get_document_or_404(
+            document_id=ingestion_result.document_id,
+            db=db
+        )
+
+        original_source_path = document.metadata_json.get("source_path")
+
+        document.filename = file.filename
+        document.metadata_json = {
+            **(document.metadata_json or {}),
+            "source_path": file.filename,
+            "original_filename": file.filename,
+            "upload_source": "api_upload",
+            "temporary_source_path": original_source_path
+        }
+
+        db.commit()
+        db.refresh(document)
+
         indexing_result = index_document_chunks(
             document_id=ingestion_result.document_id,
             db=db

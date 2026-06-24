@@ -72,6 +72,7 @@ def evaluate_rag_run(
     source_text = "\n\n".join(chunk.chunk_text for chunk in source_chunks)
 
     metrics = build_metrics(
+        query=run.input_query,
         answer=generated_answer,
         source_text=source_text,
         source_chunks=source_chunks,
@@ -150,11 +151,13 @@ def get_generated_answer_for_evaluation(
     return run.output_answer
 
 def build_metrics(
+    query: str,
     answer: str,
     source_text: str,
     source_chunks: list[DocumentChunk],
     retrieved_scores: list[float]
 ) -> list[MetricResult]:
+    query_terms = extract_keywords(query)
     answer_terms = extract_keywords(answer)
     source_terms = extract_keywords(source_text)
 
@@ -167,6 +170,14 @@ def build_metrics(
         answer_support_score = 0.0
 
     hallucination_risk = 1.0 - answer_support_score
+
+    matched_query_terms = query_terms.intersection(answer_terms)
+    missing_query_terms = query_terms.difference(answer_terms)
+
+    if query_terms:
+        query_answer_relevance_score = len(matched_query_terms) / len(query_terms)
+    else:
+        query_answer_relevance_score = 0.0
 
     top_retrieval_score = max(retrieved_scores) if retrieved_scores else 0.0
     average_retrieval_score = (
@@ -183,9 +194,10 @@ def build_metrics(
     retrieval_confidence = clamp(top_retrieval_score, 0.0, 1.0)
 
     overall_quality_score = (
-        0.55 * answer_support_score
-        + 0.25 * retrieval_confidence
-        + 0.20 * source_coverage_score
+        0.40 * answer_support_score
+        + 0.25 * query_answer_relevance_score
+        + 0.20 * retrieval_confidence
+        + 0.15 * source_coverage_score
     )
 
     return [
@@ -195,6 +207,16 @@ def build_metrics(
             details={
                 "supported_terms": sorted(supported_terms),
                 "unsupported_terms": sorted(unsupported_terms),
+                "answer_terms": sorted(answer_terms)
+            }
+        ),
+        MetricResult(
+            metric_name="query_answer_relevance_score",
+            metric_value=round(query_answer_relevance_score, 4),
+            details={
+                "query_terms": sorted(query_terms),
+                "matched_query_terms": sorted(matched_query_terms),
+                "missing_query_terms": sorted(missing_query_terms),
                 "answer_terms": sorted(answer_terms)
             }
         ),
@@ -232,9 +254,10 @@ def build_metrics(
             metric_value=round(overall_quality_score, 4),
             details={
                 "weights": {
-                    "answer_support_score": 0.55,
-                    "top_retrieval_score": 0.25,
-                    "source_coverage_score": 0.20
+                    "answer_support_score": 0.40,
+                    "query_answer_relevance_score": 0.25,
+                    "top_retrieval_score": 0.20,
+                    "source_coverage_score": 0.15
                 }
             }
         ),
@@ -298,11 +321,10 @@ def save_metrics(
 
 def extract_keywords(text: str) -> set[str]:
     stop_words = {
-        "a", "an", "the", "is", "are", "was", "were", "do", "does", "did",
-        "can", "could", "should", "would", "i", "you", "we", "they", "he",
-        "she", "it", "this", "that", "these", "those", "to", "for", "of",
-        "in", "on", "at", "by", "with", "and", "or", "but", "from", "as",
-        "get", "be"
+        "a", "an", "the", "is", "are", "was", "were", "do", "does", "did","can", "could", "should", "would", 
+        "i", "you", "we", "they", "he", "she", "it", "this", "that", "these", "those", "to", "for", "of","in", 
+        "on", "at", "by", "with", "and", "or", "but", "from", "as","get", "be", "what", "when", "where", "who", 
+        "whom", "whose", "why", "how", "tell", "me", "about", "please", "policy", "policies", "company"
     }
 
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
