@@ -10,3 +10,5 @@ sentence-transformers
 
 groq>=0.31.0,<1.0.0
 python-multipart
+
+pypdf

@@ -41,7 +41,7 @@ def ingest_document_file(
             filename=loaded_document.filename,
             file_type=loaded_document.file_type,
             status="processing",
-            num_pages=None,
+            num_pages=loaded_document.num_pages,
             num_chunks=0,
             metadata_json={
                 **loaded_document.metadata,
