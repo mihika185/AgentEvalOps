@@ -1,9 +1,7 @@
 from pathlib import Path
 
 import pytest
-
 from backend.app.ingestion.document_loader import DocumentLoadError, load_document
-
 
 def write_simple_pdf(path: Path, lines: list[str]) -> None:
     def escape_pdf_text(text: str) -> str:
@@ -67,7 +65,6 @@ def write_simple_pdf(path: Path, lines: list[str]) -> None:
 
     path.write_bytes(pdf)
 
-
 def test_load_markdown_document(tmp_path):
     file_path = tmp_path / "policy.md"
     file_path.write_text(
@@ -83,7 +80,6 @@ def test_load_markdown_document(tmp_path):
     assert document.num_pages is None
     assert document.metadata["loader"] == "plain_text_loader"
 
-
 def test_load_empty_text_document_fails(tmp_path):
     file_path = tmp_path / "empty.txt"
     file_path.write_text("", encoding="utf-8")
@@ -91,14 +87,12 @@ def test_load_empty_text_document_fails(tmp_path):
     with pytest.raises(DocumentLoadError, match="File is empty"):
         load_document(file_path)
 
-
 def test_load_unsupported_file_type_fails(tmp_path):
     file_path = tmp_path / "data.csv"
     file_path.write_text("name,value\nabc,123", encoding="utf-8")
 
     with pytest.raises(DocumentLoadError, match="Unsupported file type"):
         load_document(file_path)
-
 
 def test_load_pdf_document(tmp_path):
     file_path = tmp_path / "policy.pdf"

@@ -10,13 +10,15 @@ from backend.app.retrieval.retrieval_service import (
     retrieve_relevant_chunks,
 )
 
-
 logger = get_logger(__name__)
 
+SAFE_FALLBACK_ANSWER = (
+    "I could not find enough reliable evidence in the provided documents "
+    "to answer this confidently."
+)
 
 class RAGAnswerError(Exception):
     pass
-
 
 @dataclass(frozen=True)
 class SourceChunk:
@@ -25,7 +27,6 @@ class SourceChunk:
     score: float
     text: str
     metadata: dict[str, Any]
-
 
 @dataclass(frozen=True)
 class RAGAnswerResult:
@@ -36,20 +37,18 @@ class RAGAnswerResult:
     document_id: Optional[str]
     answer_generator: str
 
-
 class AnswerGenerator(Protocol):
     generator_name: str
 
     def generate_answer(self, query: str, chunks: list[RetrievedChunk]) -> str:
         pass
 
-
 class SimpleExtractiveAnswerGenerator:
     generator_name = "simple-extractive-v1"
 
     def generate_answer(self, query: str, chunks: list[RetrievedChunk]) -> str:
         if not chunks:
-            return "I could not find relevant context to answer this question."
+            return SAFE_FALLBACK_ANSWER
 
         query_terms = extract_keywords(query)
         candidate_sentences = collect_candidate_sentences(chunks)
@@ -68,7 +67,6 @@ class SimpleExtractiveAnswerGenerator:
             "The closest retrieved context is: "
             f"{clean_context_text(chunks[0].text)}"
         )
-
 
 def answer_question(
     query: str,
@@ -124,7 +122,6 @@ def answer_question(
         logger.exception("Unexpected RAG answer failure")
         raise RAGAnswerError("Failed to answer question") from exc
 
-
 def extract_keywords(text: str) -> set[str]:
     stop_words = {
         "a", "an", "the", "is", "are", "was", "were", "do", "does", "did",
@@ -137,7 +134,6 @@ def extract_keywords(text: str) -> set[str]:
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
 
     return {token for token in tokens if token not in stop_words}
-
 
 def clean_context_text(text: str) -> str:
     cleaned_lines: list[str] = []
@@ -155,7 +151,6 @@ def clean_context_text(text: str) -> str:
 
     return " ".join(cleaned_lines)
 
-
 def collect_candidate_sentences(chunks: list[RetrievedChunk]) -> list[str]:
     sentences: list[str] = []
     seen_sentences: set[str] = set()
@@ -169,9 +164,7 @@ def collect_candidate_sentences(chunks: list[RetrievedChunk]) -> list[str]:
 
             if not sentence:
                 continue
-
             sentence_key = sentence.lower()
-
             if sentence_key in seen_sentences:
                 continue
 
@@ -180,7 +173,6 @@ def collect_candidate_sentences(chunks: list[RetrievedChunk]) -> list[str]:
 
     return sentences
 
-
 def normalize_sentence(sentence: str) -> str:
     sentence = sentence.strip()
     sentence = re.sub(r"\s+", " ", sentence)
@@ -188,7 +180,6 @@ def normalize_sentence(sentence: str) -> str:
     sentence = re.sub(r"^\d+[.)]\s+", "", sentence)
 
     return sentence.strip()
-
 
 def rank_sentences(
     sentences: list[str],
@@ -208,25 +199,21 @@ def rank_sentences(
         reverse=True
     )
 
-
 def choose_best_sentence(
     ranked_sentences: list[tuple[str, int, int]]
 ) -> Optional[str]:
     for sentence, score, _ in ranked_sentences:
         if score <= 0:
             continue
-
         if looks_like_overlap_fragment(sentence):
             continue
-
         return sentence
-
+    
     for sentence, score, _ in ranked_sentences:
         if score > 0:
             return sentence
 
     return None
-
 
 def looks_like_overlap_fragment(sentence: str) -> bool:
     words = sentence.split()
