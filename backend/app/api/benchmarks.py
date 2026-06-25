@@ -1,19 +1,22 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.connection import get_db
-from backend.app.database.models import(
+from backend.app.database.models import (
     BenchmarkDataset,
     BenchmarkRun,
     BenchmarkRunItem,
     BenchmarkTestCase,
     Document,
+    PipelineConfig,
     utc_now,
 )
+from backend.app.rag.answer_service import SimpleExtractiveAnswerGenerator
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
 
 
@@ -107,7 +110,10 @@ class BenchmarkTestCaseUpdateRequest(BaseModel):
 
     @field_validator("expected_keywords")
     @classmethod
-    def clean_expected_keywords(cls, values: Optional[list[str]]) -> Optional[list[str]]:
+    def clean_expected_keywords(
+        cls,
+        values: Optional[list[str]]
+    ) -> Optional[list[str]]:
         if values is None:
             return None
 
@@ -146,6 +152,7 @@ class BenchmarkTestCaseResponse(BaseModel):
 class BenchmarkDatasetDetailResponse(BenchmarkDatasetResponse):
     test_cases: list[BenchmarkTestCaseResponse]
 
+
 class BenchmarkRunItemResponse(BaseModel):
     id: str
     benchmark_run_id: str
@@ -164,6 +171,7 @@ class BenchmarkRunItemResponse(BaseModel):
     latency_ms: Optional[int]
     metadata_json: dict[str, Any]
     created_at: datetime
+
 
 class BenchmarkRunResponse(BaseModel):
     id: str
@@ -193,8 +201,30 @@ class BenchmarkRunResponse(BaseModel):
     started_at: datetime
     completed_at: Optional[datetime]
 
+
 class BenchmarkRunDetailResponse(BenchmarkRunResponse):
     items: list[BenchmarkRunItemResponse]
+
+
+class BenchmarkComparisonRequest(BaseModel):
+    pipeline_config_ids: list[str] = Field(..., min_length=1, max_length=5)
+
+
+class PipelineBenchmarkResultResponse(BaseModel):
+    pipeline_config_id: str
+    pipeline_config_name: str
+    benchmark_run: BenchmarkRunDetailResponse
+
+
+class BenchmarkComparisonResponse(BaseModel):
+    dataset_id: str
+    total_pipeline_configs: int
+    best_pipeline_config_id: Optional[str]
+    best_pipeline_config_name: Optional[str]
+    ranking_metric: str
+    selection_reason: str
+    results: list[PipelineBenchmarkResultResponse]
+
 
 def get_dataset_or_404(dataset_id: str, db: Session) -> BenchmarkDataset:
     dataset = db.get(BenchmarkDataset, dataset_id)
@@ -249,6 +279,153 @@ def validate_test_case_payload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Answerable test cases need at least one expected keyword"
         )
+
+
+def answer_generator_from_pipeline_config(
+    pipeline_config: PipelineConfig
+):
+    provider = pipeline_config.answer_generator_provider.strip().lower()
+
+    if provider == "extractive":
+        return SimpleExtractiveAnswerGenerator()
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Unsupported answer_generator_provider "
+            f"'{pipeline_config.answer_generator_provider}' for benchmark comparison"
+        )
+    )
+
+
+def execute_benchmark_run(
+    db: Session,
+    dataset: BenchmarkDataset,
+    test_cases: list[BenchmarkTestCase],
+    top_k: int,
+    pipeline_config: Optional[PipelineConfig] = None
+) -> tuple[BenchmarkRun, list[BenchmarkRunItem]]:
+    benchmark_metadata = {
+        "dataset_name": dataset.name,
+        "top_k": top_k,
+        "runner_version": "benchmark-runner-v1"
+    }
+
+    answer_generator = None
+
+    if pipeline_config is not None:
+        answer_generator = answer_generator_from_pipeline_config(pipeline_config)
+
+        benchmark_metadata = {
+            **benchmark_metadata,
+            "pipeline_config_id": pipeline_config.id,
+            "pipeline_config_name": pipeline_config.name,
+            "retrieval_provider": pipeline_config.retrieval_provider,
+            "answer_generator_provider": pipeline_config.answer_generator_provider,
+            "answer_generator_model": pipeline_config.answer_generator_model,
+            "embedding_provider": pipeline_config.embedding_provider,
+            "embedding_model": pipeline_config.embedding_model,
+            "quality_gate_profile": pipeline_config.quality_gate_profile,
+        }
+
+    benchmark_run = BenchmarkRun(
+        dataset_id=dataset.id,
+        status="running",
+        total_cases=len(test_cases),
+        metadata_json=benchmark_metadata
+    )
+
+    db.add(benchmark_run)
+    db.commit()
+    db.refresh(benchmark_run)
+
+    run_items: list[BenchmarkRunItem] = []
+
+    for test_case in test_cases:
+        try:
+            result = run_rag_answer_workflow(
+                db=db,
+                query=test_case.question,
+                top_k=top_k,
+                document_id=test_case.document_id or dataset.document_id,
+                answer_generator=answer_generator
+            )
+
+            metrics = to_metrics_dict(result)
+
+            passed, failure_reason = judge_benchmark_case(
+                expected_behavior=test_case.expected_behavior,
+                expected_keywords=test_case.expected_keywords,
+                answer=result.answer,
+                quality_gate_passed=result.quality_gate_passed,
+                response_blocked_by_quality_gate=result.response_blocked_by_quality_gate
+            )
+
+            run_item = BenchmarkRunItem(
+                benchmark_run_id=benchmark_run.id,
+                test_case_id=test_case.id,
+                rag_run_id=result.run_id,
+                question=test_case.question,
+                expected_behavior=test_case.expected_behavior,
+                expected_keywords=test_case.expected_keywords,
+                actual_answer=result.answer,
+                passed=passed,
+                failure_reason=failure_reason,
+                quality_gate_passed=result.quality_gate_passed,
+                response_blocked_by_quality_gate=result.response_blocked_by_quality_gate,
+                metrics_json=metrics,
+                source_chunks_json=to_source_chunks_json(result),
+                latency_ms=result.total_latency_ms,
+                metadata_json={
+                    "dataset_id": dataset.id,
+                    "document_id": test_case.document_id or dataset.document_id,
+                    "tags": test_case.tags,
+                    "pipeline_config_id": pipeline_config.id if pipeline_config else None,
+                    "pipeline_config_name": pipeline_config.name if pipeline_config else None,
+                }
+            )
+
+        except RAGWorkflowError as exc:
+            run_item = BenchmarkRunItem(
+                benchmark_run_id=benchmark_run.id,
+                test_case_id=test_case.id,
+                rag_run_id=None,
+                question=test_case.question,
+                expected_behavior=test_case.expected_behavior,
+                expected_keywords=test_case.expected_keywords,
+                actual_answer=None,
+                passed=False,
+                failure_reason=str(exc),
+                quality_gate_passed=False,
+                response_blocked_by_quality_gate=False,
+                metrics_json={},
+                source_chunks_json=[],
+                latency_ms=None,
+                metadata_json={
+                    "dataset_id": dataset.id,
+                    "document_id": test_case.document_id or dataset.document_id,
+                    "tags": test_case.tags,
+                    "pipeline_config_id": pipeline_config.id if pipeline_config else None,
+                    "pipeline_config_name": pipeline_config.name if pipeline_config else None,
+                    "error_type": "RAGWorkflowError"
+                }
+            )
+
+        db.add(run_item)
+        run_items.append(run_item)
+
+    db.commit()
+
+    for item in run_items:
+        db.refresh(item)
+
+    finalize_benchmark_run(
+        db=db,
+        benchmark_run=benchmark_run,
+        run_items=run_items
+    )
+
+    return benchmark_run, run_items
 
 
 @router.post(
@@ -455,6 +632,7 @@ def update_test_case(
 
     return to_test_case_response(test_case)
 
+
 @router.delete("/test-cases/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_test_case(
     test_case_id: str,
@@ -466,6 +644,7 @@ def delete_test_case(
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.post(
     "/datasets/{dataset_id}/runs",
@@ -491,106 +670,98 @@ def run_benchmark_dataset(
             detail="Benchmark dataset has no test cases"
         )
 
-    benchmark_run = BenchmarkRun(
-        dataset_id=dataset_id,
-        status="running",
-        total_cases=len(test_cases),
-        metadata_json={
-            "dataset_name": dataset.name,
-            "top_k": top_k,
-            "runner_version": "benchmark-runner-v1"
-        }
-    )
-
-    db.add(benchmark_run)
-    db.commit()
-    db.refresh(benchmark_run)
-
-    run_items: list[BenchmarkRunItem] = []
-
-    for test_case in test_cases:
-        try:
-            result = run_rag_answer_workflow(
-                db=db,
-                query=test_case.question,
-                top_k=top_k,
-                document_id=test_case.document_id or dataset.document_id
-            )
-
-            metrics = to_metrics_dict(result)
-
-            passed, failure_reason = judge_benchmark_case(
-                expected_behavior=test_case.expected_behavior,
-                expected_keywords=test_case.expected_keywords,
-                answer=result.answer,
-                quality_gate_passed=result.quality_gate_passed,
-                response_blocked_by_quality_gate=result.response_blocked_by_quality_gate
-            )
-
-            run_item = BenchmarkRunItem(
-                benchmark_run_id=benchmark_run.id,
-                test_case_id=test_case.id,
-                rag_run_id=result.run_id,
-                question=test_case.question,
-                expected_behavior=test_case.expected_behavior,
-                expected_keywords=test_case.expected_keywords,
-                actual_answer=result.answer,
-                passed=passed,
-                failure_reason=failure_reason,
-                quality_gate_passed=result.quality_gate_passed,
-                response_blocked_by_quality_gate=result.response_blocked_by_quality_gate,
-                metrics_json=metrics,
-                source_chunks_json=to_source_chunks_json(result),
-                latency_ms=result.total_latency_ms,
-                metadata_json={
-                    "dataset_id": dataset_id,
-                    "document_id": test_case.document_id or dataset.document_id,
-                    "tags": test_case.tags
-                }
-            )
-
-        except RAGWorkflowError as exc:
-            run_item = BenchmarkRunItem(
-                benchmark_run_id=benchmark_run.id,
-                test_case_id=test_case.id,
-                rag_run_id=None,
-                question=test_case.question,
-                expected_behavior=test_case.expected_behavior,
-                expected_keywords=test_case.expected_keywords,
-                actual_answer=None,
-                passed=False,
-                failure_reason=str(exc),
-                quality_gate_passed=False,
-                response_blocked_by_quality_gate=False,
-                metrics_json={},
-                source_chunks_json=[],
-                latency_ms=None,
-                metadata_json={
-                    "dataset_id": dataset_id,
-                    "document_id": test_case.document_id or dataset.document_id,
-                    "tags": test_case.tags,
-                    "error_type": "RAGWorkflowError"
-                }
-            )
-
-        db.add(run_item)
-        run_items.append(run_item)
-
-    db.commit()
-
-    for item in run_items:
-        db.refresh(item)
-
-    finalize_benchmark_run(
+    benchmark_run, run_items = execute_benchmark_run(
         db=db,
-        benchmark_run=benchmark_run,
-        run_items=run_items
+        dataset=dataset,
+        test_cases=test_cases,
+        top_k=top_k
     )
 
     return to_benchmark_run_detail_response(
         benchmark_run=benchmark_run,
         run_items=run_items
     )
+
+
+@router.post(
+    "/datasets/{dataset_id}/compare",
+    response_model=BenchmarkComparisonResponse,
+    status_code=status.HTTP_201_CREATED
+)
+def compare_pipeline_configs_on_dataset(
+    dataset_id: str,
+    payload: BenchmarkComparisonRequest,
+    db: Annotated[Session, Depends(get_db)]
+):
+    dataset = get_dataset_or_404(dataset_id, db)
+
+    test_cases = db.execute(
+        select(BenchmarkTestCase)
+        .where(BenchmarkTestCase.dataset_id == dataset_id)
+        .order_by(BenchmarkTestCase.created_at.asc())
+    ).scalars().all()
+
+    if not test_cases:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Benchmark dataset has no test cases"
+        )
+
+    unique_config_ids = list(dict.fromkeys(payload.pipeline_config_ids))
+
+    pipeline_configs: list[PipelineConfig] = []
+
+    for pipeline_config_id in unique_config_ids:
+        pipeline_config = db.get(PipelineConfig, pipeline_config_id)
+
+        if pipeline_config is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Pipeline config with id '{pipeline_config_id}' was not found"
+            )
+
+        if not pipeline_config.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Pipeline config with id '{pipeline_config_id}' is not active"
+            )
+
+        pipeline_configs.append(pipeline_config)
+
+    results: list[PipelineBenchmarkResultResponse] = []
+
+    for pipeline_config in pipeline_configs:
+        benchmark_run, run_items = execute_benchmark_run(
+            db=db,
+            dataset=dataset,
+            test_cases=test_cases,
+            top_k=pipeline_config.top_k,
+            pipeline_config=pipeline_config
+        )
+
+        results.append(
+            PipelineBenchmarkResultResponse(
+                pipeline_config_id=pipeline_config.id,
+                pipeline_config_name=pipeline_config.name,
+                benchmark_run=to_benchmark_run_detail_response(
+                    benchmark_run=benchmark_run,
+                    run_items=run_items
+                )
+            )
+        )
+
+    best_result, selection_reason = pick_best_pipeline_result(results)
+
+    return BenchmarkComparisonResponse(
+        dataset_id=dataset_id,
+        total_pipeline_configs=len(results),
+        best_pipeline_config_id=best_result.pipeline_config_id if best_result else None,
+        best_pipeline_config_name=best_result.pipeline_config_name if best_result else None,
+        ranking_metric="pass_rate_then_overall_quality",
+        selection_reason=selection_reason,
+        results=results
+    )
+
 
 @router.get("/runs", response_model=list[BenchmarkRunResponse])
 def list_benchmark_runs(
@@ -618,6 +789,7 @@ def list_benchmark_runs(
         for run in runs
     ]
 
+
 @router.get("/runs/{benchmark_run_id}", response_model=BenchmarkRunDetailResponse)
 def get_benchmark_run(
     benchmark_run_id: str,
@@ -642,6 +814,7 @@ def get_benchmark_run(
         run_items=run_items
     )
 
+
 def metric_value(metrics: dict[str, float], name: str) -> Optional[float]:
     value = metrics.get(name)
 
@@ -650,11 +823,13 @@ def metric_value(metrics: dict[str, float], name: str) -> Optional[float]:
 
     return float(value)
 
-def average(values: list[float])-> Optional[float]:
+
+def average(values: list[float]) -> Optional[float]:
     if not values:
         return None
 
-    return round(sum(values)/len(values), 4)
+    return round(sum(values) / len(values), 4)
+
 
 def keyword_missing_from_answer(
     answer: str,
@@ -667,6 +842,7 @@ def keyword_missing_from_answer(
         for keyword in expected_keywords
         if keyword.lower() not in normalized_answer
     ]
+
 
 def judge_benchmark_case(
     expected_behavior: str,
@@ -710,6 +886,56 @@ def to_metrics_dict(result) -> dict[str, float]:
         for metric in result.evaluation_metrics
     }
 
+
+def pick_best_pipeline_result(
+    results: list[PipelineBenchmarkResultResponse]
+) -> tuple[Optional[PipelineBenchmarkResultResponse], str]:
+    if not results:
+        return None, "No pipeline results were available."
+
+    def quality_key(result: PipelineBenchmarkResultResponse):
+        run = result.benchmark_run
+
+        return (
+            run.pass_rate or 0.0,
+            run.average_overall_quality_score or 0.0,
+        )
+
+    ranked_results = sorted(
+        results,
+        key=quality_key,
+        reverse=True
+    )
+
+    best_result = ranked_results[0]
+    best_key = quality_key(best_result)
+
+    tied_results = [
+        result
+        for result in ranked_results
+        if quality_key(result) == best_key
+    ]
+
+    if len(tied_results) > 1:
+        tied_names = ", ".join(
+            result.pipeline_config_name
+            for result in tied_results
+        )
+
+        return (
+            None,
+            f"No clear winner. These configs tied on pass rate and quality: {tied_names}."
+        )
+
+    return (
+        best_result,
+        (
+            "Selected because it had the highest pass rate, "
+            "then highest average overall quality."
+        )
+    )
+
+
 def to_source_chunks_json(result) -> list[dict[str, Any]]:
     return [
         {
@@ -722,6 +948,7 @@ def to_source_chunks_json(result) -> list[dict[str, Any]]:
         for chunk in result.source_chunks
     ]
 
+
 def to_dataset_response(dataset: BenchmarkDataset) -> BenchmarkDatasetResponse:
     return BenchmarkDatasetResponse(
         id=dataset.id,
@@ -732,6 +959,7 @@ def to_dataset_response(dataset: BenchmarkDataset) -> BenchmarkDatasetResponse:
         created_at=dataset.created_at,
         updated_at=dataset.updated_at
     )
+
 
 def to_test_case_response(test_case: BenchmarkTestCase) -> BenchmarkTestCaseResponse:
     return BenchmarkTestCaseResponse(
@@ -747,6 +975,7 @@ def to_test_case_response(test_case: BenchmarkTestCase) -> BenchmarkTestCaseResp
         updated_at=test_case.updated_at
     )
 
+
 def finalize_benchmark_run(
     db: Session,
     benchmark_run: BenchmarkRun,
@@ -757,21 +986,25 @@ def finalize_benchmark_run(
         for item in run_items
         if item.passed
     ]
+
     answerable_items = [
         item
         for item in run_items
         if item.expected_behavior == "answerable"
     ]
+
     unanswerable_items = [
         item
         for item in run_items
         if item.expected_behavior == "unanswerable"
     ]
+
     answerable_passed = [
         item
         for item in answerable_items
         if item.passed
     ]
+
     unanswerable_passed = [
         item
         for item in unanswerable_items
@@ -787,6 +1020,7 @@ def finalize_benchmark_run(
     for item in run_items:
         if item.latency_ms is not None:
             latency_values.append(float(item.latency_ms))
+
         if item.expected_behavior != "answerable":
             continue
 
@@ -797,6 +1031,7 @@ def finalize_benchmark_run(
 
         if support_score is not None:
             support_scores.append(support_score)
+
         if relevance_score is not None:
             relevance_scores.append(relevance_score)
 

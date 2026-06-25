@@ -364,3 +364,62 @@ class BenchmarkRunItem(Base):
     metadata_json = Column(JSON, nullable=False, default=dict)
 
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+class PipelineConfig(Base):
+    __tablename__ = "pipeline_configs"
+
+    id = Column(String(40), primary_key=True, default=lambda: generate_id("pipe"))
+
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    retrieval_provider = Column(
+        String(80),
+        nullable=False,
+        default="qdrant_vector_search"
+    )
+
+    top_k = Column(Integer, nullable=False, default=3)
+
+    answer_generator_provider = Column(
+        String(80),
+        nullable=False,
+        default="extractive"
+    )
+
+    answer_generator_model = Column(
+        String(120),
+        nullable=False,
+        default="simple-extractive-v1"
+    )
+
+    embedding_provider = Column(
+        String(120),
+        nullable=False,
+        default="sentence-transformers"
+    )
+
+    embedding_model = Column(
+        String(255),
+        nullable=False,
+        default="sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+    quality_gate_profile = Column(
+        String(120),
+        nullable=False,
+        default="default-v1"
+    )
+
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    metadata_json = Column(JSON, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now
+    )

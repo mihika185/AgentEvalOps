@@ -10,6 +10,7 @@ from backend.app.logging_config import configure_logging, get_logger
 from backend.app.api.runs import router as runs_router
 from backend.app.api.quality_gates import router as quality_gates_router
 from backend.app.api.benchmarks import router as benchmarks_router
+from backend.app.api.pipeline_configs import router as pipeline_configs_router
 
 configure_logging()
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ app.include_router(rag_router, prefix=settings.api_prefix)
 app.include_router(runs_router, prefix=settings.api_prefix)
 app.include_router(quality_gates_router, prefix=settings.api_prefix)
 app.include_router(benchmarks_router, prefix=settings.api_prefix)
+app.include_router(pipeline_configs_router, prefix=settings.api_prefix)
 
 logger.info(
     "%s initialized in %s mode",
