@@ -2,7 +2,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.database.connection import Base
@@ -223,3 +224,143 @@ class QualityGate(Base):
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+class BenchmarkDataset(Base):
+    __tablename__ = "benchmark_datasets"
+
+    id = Column(String(40), primary_key=True, default=lambda: generate_id("dataset"))
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    document_id = Column(
+        String(40),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    metadata_json = Column(JSON, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now
+    )
+
+
+class BenchmarkTestCase(Base):
+    __tablename__ = "benchmark_test_cases"
+
+    id = Column(String(40), primary_key=True, default=lambda: generate_id("case"))
+
+    dataset_id = Column(
+        String(40),
+        ForeignKey("benchmark_datasets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    question = Column(Text, nullable=False)
+
+    document_id = Column(
+        String(40),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    expected_behavior = Column(String(30), nullable=False)
+    expected_keywords = Column(JSON, nullable=False, default=list)
+
+    tags = Column(JSON, nullable=False, default=list)
+    metadata_json = Column(JSON, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now
+    )
+
+class BenchmarkRun(Base):
+    __tablename__ = "benchmark_runs"
+
+    id = Column(String(40), primary_key=True, default=lambda: generate_id("benchrun"))
+
+    dataset_id = Column(
+        String(40),
+        ForeignKey("benchmark_datasets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    status = Column(String(30), nullable=False, default="running")
+
+    total_cases = Column(Integer, nullable=False, default=0)
+    passed_cases = Column(Integer, nullable=False, default=0)
+    failed_cases = Column(Integer, nullable=False, default=0)
+
+    answerable_cases = Column(Integer, nullable=False, default=0)
+    answerable_passed = Column(Integer, nullable=False, default=0)
+    unanswerable_cases = Column(Integer, nullable=False, default=0)
+    unanswerable_passed = Column(Integer, nullable=False, default=0)
+
+    average_answer_support_score = Column(Float, nullable=True)
+    average_query_answer_relevance_score = Column(Float, nullable=True)
+    average_hallucination_risk = Column(Float, nullable=True)
+    average_overall_quality_score = Column(Float, nullable=True)
+    average_latency_ms = Column(Float, nullable=True)
+
+    metadata_json = Column(JSON, nullable=False, default=dict)
+
+    started_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class BenchmarkRunItem(Base):
+    __tablename__ = "benchmark_run_items"
+
+    id = Column(String(40), primary_key=True, default=lambda: generate_id("benchitem"))
+
+    benchmark_run_id = Column(
+        String(40),
+        ForeignKey("benchmark_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+
+    test_case_id = Column(
+        String(40),
+        ForeignKey("benchmark_test_cases.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    rag_run_id = Column(
+        String(40),
+        ForeignKey("runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+
+    question = Column(Text, nullable=False)
+    expected_behavior = Column(String(30), nullable=False)
+    expected_keywords = Column(JSON, nullable=False, default=list)
+
+    actual_answer = Column(Text, nullable=True)
+    passed = Column(Boolean, nullable=False, default=False)
+    failure_reason = Column(Text, nullable=True)
+
+    quality_gate_passed = Column(Boolean, nullable=False, default=False)
+    response_blocked_by_quality_gate = Column(Boolean, nullable=False, default=False)
+
+    metrics_json = Column(JSON, nullable=False, default=dict)
+    source_chunks_json = Column(JSON, nullable=False, default=list)
+    latency_ms = Column(Integer, nullable=True)
+
+    metadata_json = Column(JSON, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
