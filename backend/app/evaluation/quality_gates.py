@@ -251,10 +251,8 @@ def compare_metric(metric_value: float, operator: str, threshold: float) -> bool
         return metric_value < threshold
     if operator == "==":
         return metric_value == threshold
-    if operator == "!=":
-        return metric_value != threshold
 
-    raise QualityGateError(f"Unsupported quality gate operator: {operator}")
+    raise ValueError(f"Unsupported quality gate operator: {operator}")
 
 def save_quality_gate_summary(
     db: Session,
