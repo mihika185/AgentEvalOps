@@ -225,6 +225,30 @@ class BenchmarkComparisonResponse(BaseModel):
     selection_reason: str
     results: list[PipelineBenchmarkResultResponse]
 
+class BenchmarkFailureItemResponse(BaseModel):
+    benchmark_item_id: str
+    test_case_id: Optional[str]
+    rag_run_id: Optional[str]
+    question: str
+    expected_behavior: str
+    actual_answer: Optional[str]
+    failure_reason: Optional[str]
+    failure_category: str
+    quality_gate_passed: bool
+    response_blocked_by_quality_gate: bool
+    metrics_json: dict[str, Any]
+    pipeline_config_id: Optional[str]
+    pipeline_config_name: Optional[str]
+
+
+class BenchmarkFailureAnalysisResponse(BaseModel):
+    benchmark_run_id: str
+    dataset_id: str
+    total_cases: int
+    failed_cases: int
+    failure_categories: dict[str, int]
+    failed_items: list[BenchmarkFailureItemResponse]
+    summary: str
 
 def get_dataset_or_404(dataset_id: str, db: Session) -> BenchmarkDataset:
     dataset = db.get(BenchmarkDataset, dataset_id)
@@ -262,7 +286,6 @@ def ensure_document_exists(document_id: Optional[str], db: Session) -> None:
             detail=f"Document with id '{document_id}' was not found"
         )
 
-
 def validate_test_case_payload(
     expected_behavior: str,
     expected_keywords: list[str],
@@ -280,7 +303,6 @@ def validate_test_case_payload(
             detail="Answerable test cases need at least one expected keyword"
         )
 
-
 def answer_generator_from_pipeline_config(
     pipeline_config: PipelineConfig
 ):
@@ -296,7 +318,6 @@ def answer_generator_from_pipeline_config(
             f"'{pipeline_config.answer_generator_provider}' for benchmark comparison"
         )
     )
-
 
 def execute_benchmark_run(
     db: Session,
@@ -427,12 +448,12 @@ def execute_benchmark_run(
 
     return benchmark_run, run_items
 
-
 @router.post(
     "/datasets",
     response_model=BenchmarkDatasetResponse,
     status_code=status.HTTP_201_CREATED
 )
+
 def create_dataset(
     payload: BenchmarkDatasetCreateRequest,
     db: Annotated[Session, Depends(get_db)]
@@ -790,7 +811,11 @@ def list_benchmark_runs(
     ]
 
 
-@router.get("/runs/{benchmark_run_id}", response_model=BenchmarkRunDetailResponse)
+@router.get(""
+    "/runs/{benchmark_run_id}", 
+    response_model=BenchmarkRunDetailResponse
+)
+
 def get_benchmark_run(
     benchmark_run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -814,6 +839,58 @@ def get_benchmark_run(
         run_items=run_items
     )
 
+@router.get(
+    "/runs/{benchmark_run_id}/failure-analysis",
+    response_model=BenchmarkFailureAnalysisResponse
+)
+def analyze_benchmark_run_failures(
+    benchmark_run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    benchmark_run = db.get(BenchmarkRun, benchmark_run_id)
+
+    if benchmark_run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Benchmark run with id '{benchmark_run_id}' was not found"
+        )
+
+    run_items = db.execute(
+        select(BenchmarkRunItem)
+        .where(BenchmarkRunItem.benchmark_run_id == benchmark_run_id)
+        .order_by(BenchmarkRunItem.created_at.asc())
+    ).scalars().all()
+
+    failed_items = [
+        item
+        for item in run_items
+        if not item.passed
+    ]
+
+    failure_responses = [
+        to_failure_item_response(item)
+        for item in failed_items
+    ]
+
+    failure_categories: dict[str, int] = {}
+
+    for failure in failure_responses:
+        failure_categories[failure.failure_category] = (
+            failure_categories.get(failure.failure_category, 0) + 1
+        )
+
+    return BenchmarkFailureAnalysisResponse(
+        benchmark_run_id=benchmark_run.id,
+        dataset_id=benchmark_run.dataset_id,
+        total_cases=len(run_items),
+        failed_cases=len(failed_items),
+        failure_categories=failure_categories,
+        failed_items=failure_responses,
+        summary=build_failure_summary(
+            failed_cases=len(failed_items),
+            failure_categories=failure_categories
+        )
+    )
 
 def metric_value(metrics: dict[str, float], name: str) -> Optional[float]:
     value = metrics.get(name)
@@ -886,7 +963,6 @@ def to_metrics_dict(result) -> dict[str, float]:
         for metric in result.evaluation_metrics
     }
 
-
 def pick_best_pipeline_result(
     results: list[PipelineBenchmarkResultResponse]
 ) -> tuple[Optional[PipelineBenchmarkResultResponse], str]:
@@ -935,6 +1011,74 @@ def pick_best_pipeline_result(
         )
     )
 
+def categorize_benchmark_failure(item: BenchmarkRunItem) -> str:
+    if item.passed:
+        return "passed"
+
+    failure_reason = (item.failure_reason or "").lower()
+
+    if "missing expected keywords" in failure_reason:
+        return "missing_expected_keywords"
+    if "quality gate blocked" in failure_reason:
+        return "answer_blocked_by_quality_gate"
+
+    if "quality gates did not pass" in failure_reason:
+        return "quality_gate_failed"
+
+    if "unanswerable query to be blocked" in failure_reason:
+        return "unanswerable_answer_returned"
+    if item.metadata_json.get("error_type") == "RAGWorkflowError":
+        return "rag_workflow_error"
+
+    return "unknown_failure"
+
+def build_failure_summary(
+    failed_cases: int,
+    failure_categories: dict[str, int]
+) -> str:
+    if failed_cases == 0:
+        return "No benchmark failures were found for this run."
+
+    sorted_categories = sorted(
+        failure_categories.items(),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    top_category, top_count = sorted_categories[0]
+
+    if len(sorted_categories) == 1:
+        return (
+            f"{failed_cases} benchmark case(s) failed. "
+            f"The only failure category was '{top_category}' "
+            f"with {top_count} case(s)."
+        )
+
+    return (
+        f"{failed_cases} benchmark case(s) failed. "
+        f"The most common failure category was '{top_category}' "
+        f"with {top_count} case(s)."
+    )
+
+
+def to_failure_item_response(
+    item: BenchmarkRunItem
+) -> BenchmarkFailureItemResponse:
+    return BenchmarkFailureItemResponse(
+        benchmark_item_id=item.id,
+        test_case_id=item.test_case_id,
+        rag_run_id=item.rag_run_id,
+        question=item.question,
+        expected_behavior=item.expected_behavior,
+        actual_answer=item.actual_answer,
+        failure_reason=item.failure_reason,
+        failure_category=categorize_benchmark_failure(item),
+        quality_gate_passed=item.quality_gate_passed,
+        response_blocked_by_quality_gate=item.response_blocked_by_quality_gate,
+        metrics_json=item.metrics_json,
+        pipeline_config_id=item.metadata_json.get("pipeline_config_id"),
+        pipeline_config_name=item.metadata_json.get("pipeline_config_name")
+    )
 
 def to_source_chunks_json(result) -> list[dict[str, Any]]:
     return [
