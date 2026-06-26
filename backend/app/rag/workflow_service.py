@@ -17,15 +17,17 @@ from backend.app.rag.answer_service import AnswerGenerator, SourceChunk
 from backend.app.rag.llm_answer_generator import get_default_answer_generator
 from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_relevant_chunks
 from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
-from backend.app.evaluation.quality_gates import QualityGateError, evaluate_quality_gates
-
+from backend.app.evaluation.quality_gates import (
+    DEFAULT_QUALITY_GATE_PROFILE,
+    QualityGateError,
+    evaluate_quality_gates,
+    normalize_quality_gate_profile_name,
+)
 
 logger = get_logger(__name__)
 
-
 class RAGWorkflowError(Exception):
     pass
-
 
 @dataclass(frozen=True)
 class ObservableRAGAnswerResult:
@@ -38,18 +40,19 @@ class ObservableRAGAnswerResult:
     answer_generator: str
     total_latency_ms: int
     evaluation_metrics: list[MetricResult]
+    quality_gate_profile: str
     quality_gate_passed: bool
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
-
 
 def run_rag_answer_workflow(
     db: Session,
     query: str,
     top_k: int = settings.default_retrieval_top_k,
     document_id: Optional[str] = None,
-    answer_generator: Optional[AnswerGenerator] = None
+    answer_generator: Optional[AnswerGenerator] = None,
+    quality_gate_profile: str = DEFAULT_QUALITY_GATE_PROFILE
 ) -> ObservableRAGAnswerResult:
     cleaned_query = query.strip()
 
@@ -61,6 +64,13 @@ def run_rag_answer_workflow(
         raise RAGWorkflowError(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
         )
+    
+    try:
+        resolved_quality_gate_profile = normalize_quality_gate_profile_name(
+            quality_gate_profile
+        )
+    except QualityGateError as exc:
+        raise RAGWorkflowError(str(exc)) from exc
 
     total_start = time.perf_counter()
     run_id: Optional[str] = None
@@ -73,6 +83,7 @@ def run_rag_answer_workflow(
             metadata={
                 "document_id": document_id,
                 "top_k": top_k,
+                "quality_gate_profile": resolved_quality_gate_profile,
                 "workflow_version": "rag-answer-v1"
             }
         )
@@ -242,7 +253,8 @@ def run_rag_answer_workflow(
         quality_gate_summary = evaluate_quality_gates(
             db=db,
             run_id=run_id,
-            persist=True
+            persist=True,
+            profile_name=resolved_quality_gate_profile
         )
 
         quality_gate_latency_ms = elapsed_ms(quality_gate_start)
@@ -252,6 +264,39 @@ def run_rag_answer_workflow(
             for check in quality_gate_summary.checks
             if not check.passed
         ]
+
+        record_trace_step(
+            db=db,
+            run_id=run_id,
+            step_index=3,
+            step_type="quality_gate_evaluation",
+            name=f"evaluate_quality_gates:{quality_gate_summary.profile_name}",
+            input_data={
+                "quality_gate_profile": quality_gate_summary.profile_name,
+                "quality_gate_passed": quality_gate_summary.overall_passed,
+                "failed_quality_gates": failed_quality_gates
+            },
+            output_data={
+                "overall_passed": quality_gate_summary.overall_passed,
+                "passed_count": quality_gate_summary.passed_count,
+                "failed_count": quality_gate_summary.failed_count,
+                "total_gates": quality_gate_summary.total_gates,
+                "pass_rate": quality_gate_summary.pass_rate,
+                "checks": [
+                    {
+                        "gate_id": check.gate_id,
+                        "gate_name": check.gate_name,
+                        "metric_name": check.metric_name,
+                        "metric_value": check.metric_value,
+                        "operator": check.operator,
+                        "threshold": check.threshold,
+                        "passed": check.passed
+                    }
+                    for check in quality_gate_summary.checks
+                ]
+            },
+            latency_ms=quality_gate_latency_ms
+        )
 
         response_blocked_by_quality_gate = not quality_gate_summary.overall_passed
 
@@ -299,6 +344,7 @@ def run_rag_answer_workflow(
                 "failed_quality_gates": failed_quality_gates,
                 "raw_generated_answer": answer,
                 "response_blocked_by_quality_gate": response_blocked_by_quality_gate,
+                "quality_gate_profile": quality_gate_summary.profile_name,
             }
         )
 
@@ -321,7 +367,8 @@ def run_rag_answer_workflow(
             quality_gate_passed=quality_gate_summary.overall_passed,
             quality_gate_pass_rate=quality_gate_summary.pass_rate,
             failed_quality_gates=failed_quality_gates,
-            response_blocked_by_quality_gate=response_blocked_by_quality_gate
+            response_blocked_by_quality_gate=response_blocked_by_quality_gate,
+            quality_gate_profile=quality_gate_summary.profile_name,
         )
 
     except (RetrievalError, RunRecorderError, QualityGateError) as exc:
@@ -349,10 +396,8 @@ def run_rag_answer_workflow(
 
         raise RAGWorkflowError("Failed to run RAG answer workflow") from exc
 
-
 def elapsed_ms(start_time: float) -> int:
     return int((time.perf_counter() - start_time) * 1000)
-
 
 def mark_run_failed_safely(
     db: Session,

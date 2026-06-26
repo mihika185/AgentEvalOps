@@ -18,6 +18,7 @@ from backend.app.database.models import (
 )
 from backend.app.rag.answer_service import SimpleExtractiveAnswerGenerator
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
+from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
 
 
 router = APIRouter(
@@ -326,15 +327,19 @@ def execute_benchmark_run(
     top_k: int,
     pipeline_config: Optional[PipelineConfig] = None
 ) -> tuple[BenchmarkRun, list[BenchmarkRunItem]]:
+    resolved_quality_gate_profile = DEFAULT_QUALITY_GATE_PROFILE
+
     benchmark_metadata = {
         "dataset_name": dataset.name,
         "top_k": top_k,
+        "quality_gate_profile": resolved_quality_gate_profile,
         "runner_version": "benchmark-runner-v1"
     }
 
     answer_generator = None
 
     if pipeline_config is not None:
+        resolved_quality_gate_profile = pipeline_config.quality_gate_profile
         answer_generator = answer_generator_from_pipeline_config(pipeline_config)
 
         benchmark_metadata = {
@@ -369,7 +374,8 @@ def execute_benchmark_run(
                 query=test_case.question,
                 top_k=top_k,
                 document_id=test_case.document_id or dataset.document_id,
-                answer_generator=answer_generator
+                answer_generator=answer_generator,
+                quality_gate_profile=resolved_quality_gate_profile
             )
 
             metrics = to_metrics_dict(result)
@@ -403,6 +409,7 @@ def execute_benchmark_run(
                     "tags": test_case.tags,
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
+                    "quality_gate_profile": result.quality_gate_profile,
                 }
             )
 
@@ -428,7 +435,8 @@ def execute_benchmark_run(
                     "tags": test_case.tags,
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
-                    "error_type": "RAGWorkflowError"
+                    "error_type": "RAGWorkflowError",
+                    "quality_gate_profile": resolved_quality_gate_profile,
                 }
             )
 
@@ -474,7 +482,10 @@ def create_dataset(
     return to_dataset_response(dataset)
 
 
-@router.get("/datasets", response_model=list[BenchmarkDatasetResponse])
+@router.get(
+        "/datasets", 
+        response_model=list[BenchmarkDatasetResponse]
+)
 def list_datasets(
     db: Annotated[Session, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -495,7 +506,10 @@ def list_datasets(
     ]
 
 
-@router.get("/datasets/{dataset_id}", response_model=BenchmarkDatasetDetailResponse)
+@router.get(
+        "/datasets/{dataset_id}",
+        response_model=BenchmarkDatasetDetailResponse
+)
 def get_dataset(
     dataset_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -519,7 +533,10 @@ def get_dataset(
     )
 
 
-@router.patch("/datasets/{dataset_id}", response_model=BenchmarkDatasetResponse)
+@router.patch(
+        "/datasets/{dataset_id}",
+        response_model=BenchmarkDatasetResponse
+)
 def update_dataset(
     dataset_id: str,
     payload: BenchmarkDatasetUpdateRequest,
@@ -541,7 +558,10 @@ def update_dataset(
     return to_dataset_response(dataset)
 
 
-@router.delete("/datasets/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+        "/datasets/{dataset_id}",
+        status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_dataset(
     dataset_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -617,7 +637,10 @@ def list_test_cases(
     ]
 
 
-@router.patch("/test-cases/{test_case_id}", response_model=BenchmarkTestCaseResponse)
+@router.patch(
+        "/test-cases/{test_case_id}", 
+        response_model=BenchmarkTestCaseResponse
+)
 def update_test_case(
     test_case_id: str,
     payload: BenchmarkTestCaseUpdateRequest,
@@ -654,7 +677,10 @@ def update_test_case(
     return to_test_case_response(test_case)
 
 
-@router.delete("/test-cases/{test_case_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+        "/test-cases/{test_case_id}",
+        status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_test_case(
     test_case_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -784,7 +810,10 @@ def compare_pipeline_configs_on_dataset(
     )
 
 
-@router.get("/runs", response_model=list[BenchmarkRunResponse])
+@router.get(
+        "/runs",
+        response_model=list[BenchmarkRunResponse]
+)
 def list_benchmark_runs(
     db: Annotated[Session, Depends(get_db)],
     dataset_id: Optional[str] = None,
@@ -810,8 +839,7 @@ def list_benchmark_runs(
         for run in runs
     ]
 
-
-@router.get(""
+@router.get(
     "/runs/{benchmark_run_id}", 
     response_model=BenchmarkRunDetailResponse
 )
@@ -1213,7 +1241,6 @@ def finalize_benchmark_run(
     db.commit()
     db.refresh(benchmark_run)
 
-
 def to_benchmark_run_response(benchmark_run: BenchmarkRun) -> BenchmarkRunResponse:
     pass_rate = (
         benchmark_run.passed_cases / benchmark_run.total_cases
@@ -1263,7 +1290,6 @@ def to_benchmark_run_response(benchmark_run: BenchmarkRun) -> BenchmarkRunRespon
         completed_at=benchmark_run.completed_at
     )
 
-
 def to_benchmark_run_item_response(
     item: BenchmarkRunItem
 ) -> BenchmarkRunItemResponse:
@@ -1286,7 +1312,6 @@ def to_benchmark_run_item_response(
         metadata_json=item.metadata_json,
         created_at=item.created_at
     )
-
 
 def to_benchmark_run_detail_response(
     benchmark_run: BenchmarkRun,

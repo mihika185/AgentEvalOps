@@ -1,9 +1,11 @@
 from typing import Annotated, Any, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
+from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
 from backend.app.database.connection import get_db
 from backend.app.rag.workflow_service import (
     RAGWorkflowError,
@@ -15,6 +17,7 @@ router = APIRouter(
     tags=["RAG"]
 )
 
+
 class RAGAnswerRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int = Field(
@@ -23,6 +26,11 @@ class RAGAnswerRequest(BaseModel):
         le=settings.max_retrieval_top_k
     )
     document_id: Optional[str] = None
+    quality_gate_profile: str = Field(
+        default=DEFAULT_QUALITY_GATE_PROFILE,
+        min_length=1
+    )
+
 
 class SourceChunkResponse(BaseModel):
     chunk_id: str
@@ -31,10 +39,12 @@ class SourceChunkResponse(BaseModel):
     text: str
     metadata: dict[str, Any]
 
+
 class EvaluationMetricResponse(BaseModel):
     metric_name: str
     metric_value: float
     details: dict[str, Any]
+
 
 class RAGAnswerResponse(BaseModel):
     run_id: str
@@ -46,10 +56,12 @@ class RAGAnswerResponse(BaseModel):
     answer_generator: str
     total_latency_ms: int
     evaluation_metrics: list[EvaluationMetricResponse]
+    quality_gate_profile: str
     quality_gate_passed: bool
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
+
 
 @router.post("/answer", response_model=RAGAnswerResponse)
 def generate_rag_answer(
@@ -61,7 +73,8 @@ def generate_rag_answer(
             db=db,
             query=payload.query,
             top_k=payload.top_k,
-            document_id=payload.document_id
+            document_id=payload.document_id,
+            quality_gate_profile=payload.quality_gate_profile
         )
 
         return RAGAnswerResponse(
@@ -90,6 +103,7 @@ def generate_rag_answer(
                 )
                 for metric in result.evaluation_metrics
             ],
+            quality_gate_profile=result.quality_gate_profile,
             quality_gate_passed=result.quality_gate_passed,
             quality_gate_pass_rate=result.quality_gate_pass_rate,
             failed_quality_gates=result.failed_quality_gates,

@@ -15,6 +15,7 @@ router = APIRouter(
 )
 
 AnswerGeneratorProvider = Literal["extractive", "groq"]
+QualityGateProfile = Literal["default-v1", "strict-v1", "lenient-v1"]
 
 class PipelineConfigCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -29,7 +30,7 @@ class PipelineConfigCreateRequest(BaseModel):
     embedding_provider: str = "sentence-transformers"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
-    quality_gate_profile: str = "default-v1"
+    quality_gate_profile: QualityGateProfile = "default-v1"
     is_active: bool = True
 
     metadata_json: dict[str, Any] = Field(default_factory=dict)
@@ -63,7 +64,7 @@ class PipelineConfigUpdateRequest(BaseModel):
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
 
-    quality_gate_profile: Optional[str] = None
+    quality_gate_profile: Optional[QualityGateProfile] = None
     is_active: Optional[bool] = None
 
     metadata_json: Optional[dict[str, Any]] = None

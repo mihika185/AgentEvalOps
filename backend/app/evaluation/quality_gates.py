@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,10 +16,12 @@ from backend.app.logging_config import get_logger
 logger = get_logger(__name__)
 
 QUALITY_GATE_EVALUATOR_TYPE = "quality-gate-evaluator-v1"
+DEFAULT_QUALITY_GATE_PROFILE = "default-v1"
 
 
 class QualityGateError(Exception):
     pass
+
 
 @dataclass(frozen=True)
 class DefaultQualityGate:
@@ -27,6 +30,7 @@ class DefaultQualityGate:
     operator: str
     threshold: float
     metadata: dict[str, Any]
+
 
 @dataclass(frozen=True)
 class QualityGateCheck:
@@ -42,6 +46,7 @@ class QualityGateCheck:
 @dataclass(frozen=True)
 class QualityGateSummary:
     run_id: str
+    profile_name: str
     overall_passed: bool
     passed_count: int
     failed_count: int
@@ -49,63 +54,237 @@ class QualityGateSummary:
     pass_rate: float
     checks: list[QualityGateCheck]
 
-DEFAULT_QUALITY_GATES = [
-    DefaultQualityGate(
-        name="Minimum Answer Support",
-        metric_name="answer_support_score",
-        operator=">=",
-        threshold=0.80,
-        metadata={
-            "description": "Answer should be mostly supported by retrieved context."
-        }
-    ),
-    DefaultQualityGate(
-        name="Minimum Query Answer Relevance",
-        metric_name="query_answer_relevance_score",
-        operator=">=",
-        threshold=0.60,
-        metadata={
-            "description": "Answer should directly address the user's query."
-        }
-    ),
-    DefaultQualityGate(
-        name="Maximum Hallucination Risk",
-        metric_name="hallucination_risk",
-        operator="<=",
-        threshold=0.20,
-        metadata={
-            "description": "Unsupported answer terms should remain low."
-        }
-    ),
-    DefaultQualityGate(
-        name="Minimum Top Retrieval Score",
-        metric_name="top_retrieval_score",
-        operator=">=",
-        threshold=0.35,
-        metadata={
-            "description": "At least one retrieved chunk should be relevant enough for the current embedding model.",
-            "calibrated_for": "sentence-transformers/all-MiniLM-L6-v2"
-        }
-    ),
-    DefaultQualityGate(
-        name="Minimum Overall Quality",
-        metric_name="overall_quality_score",
-        operator=">=",
-        threshold=0.70,
-        metadata={
-            "description": "Combined RAG quality score should pass minimum threshold."
-        }
-    ),
-    DefaultQualityGate(
-        name="Minimum Source Chunks",
-        metric_name="source_chunk_count",
-        operator=">=",
-        threshold=1.0,
-        metadata={
-            "description": "Answer should have at least one retrieved source chunk."
-        }
-    ),
-]
+
+QUALITY_GATE_PROFILES: dict[str, list[DefaultQualityGate]] = {
+    "default-v1": [
+        DefaultQualityGate(
+            name="Minimum Answer Support",
+            metric_name="answer_support_score",
+            operator=">=",
+            threshold=0.80,
+            metadata={
+                "description": "Answer should be mostly supported by retrieved context."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Query Answer Relevance",
+            metric_name="query_answer_relevance_score",
+            operator=">=",
+            threshold=0.60,
+            metadata={
+                "description": "Answer should directly address the user's query."
+            }
+        ),
+        DefaultQualityGate(
+            name="Maximum Hallucination Risk",
+            metric_name="hallucination_risk",
+            operator="<=",
+            threshold=0.20,
+            metadata={
+                "description": "Unsupported answer terms should remain low."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Top Retrieval Score",
+            metric_name="top_retrieval_score",
+            operator=">=",
+            threshold=0.35,
+            metadata={
+                "description": "At least one retrieved chunk should be relevant enough for the current embedding model.",
+                "calibrated_for": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Overall Quality",
+            metric_name="overall_quality_score",
+            operator=">=",
+            threshold=0.70,
+            metadata={
+                "description": "Combined RAG quality score should pass minimum threshold."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Source Chunks",
+            metric_name="source_chunk_count",
+            operator=">=",
+            threshold=1.0,
+            metadata={
+                "description": "Answer should have at least one retrieved source chunk."
+            }
+        ),
+    ],
+    "strict-v1": [
+        DefaultQualityGate(
+            name="Minimum Answer Support",
+            metric_name="answer_support_score",
+            operator=">=",
+            threshold=0.90,
+            metadata={
+                "description": "Strict profile: answer must be strongly supported by retrieved context."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Query Answer Relevance",
+            metric_name="query_answer_relevance_score",
+            operator=">=",
+            threshold=0.75,
+            metadata={
+                "description": "Strict profile: answer must directly address most important query terms."
+            }
+        ),
+        DefaultQualityGate(
+            name="Maximum Hallucination Risk",
+            metric_name="hallucination_risk",
+            operator="<=",
+            threshold=0.10,
+            metadata={
+                "description": "Strict profile: unsupported answer terms must be very low."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Top Retrieval Score",
+            metric_name="top_retrieval_score",
+            operator=">=",
+            threshold=0.40,
+            metadata={
+                "description": "Strict profile: top retrieved chunk must be more confidently relevant.",
+                "calibrated_for": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Overall Quality",
+            metric_name="overall_quality_score",
+            operator=">=",
+            threshold=0.80,
+            metadata={
+                "description": "Strict profile: combined RAG quality score must be high."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Source Chunks",
+            metric_name="source_chunk_count",
+            operator=">=",
+            threshold=1.0,
+            metadata={
+                "description": "Answer should have at least one retrieved source chunk."
+            }
+        ),
+    ],
+    "lenient-v1": [
+        DefaultQualityGate(
+            name="Minimum Answer Support",
+            metric_name="answer_support_score",
+            operator=">=",
+            threshold=0.65,
+            metadata={
+                "description": "Lenient profile: allows partially supported answers."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Query Answer Relevance",
+            metric_name="query_answer_relevance_score",
+            operator=">=",
+            threshold=0.40,
+            metadata={
+                "description": "Lenient profile: allows weaker query-answer overlap."
+            }
+        ),
+        DefaultQualityGate(
+            name="Maximum Hallucination Risk",
+            metric_name="hallucination_risk",
+            operator="<=",
+            threshold=0.35,
+            metadata={
+                "description": "Lenient profile: tolerates more unsupported answer terms."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Top Retrieval Score",
+            metric_name="top_retrieval_score",
+            operator=">=",
+            threshold=0.25,
+            metadata={
+                "description": "Lenient profile: allows lower retrieval confidence.",
+                "calibrated_for": "sentence-transformers/all-MiniLM-L6-v2"
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Overall Quality",
+            metric_name="overall_quality_score",
+            operator=">=",
+            threshold=0.55,
+            metadata={
+                "description": "Lenient profile: allows lower combined quality score."
+            }
+        ),
+        DefaultQualityGate(
+            name="Minimum Source Chunks",
+            metric_name="source_chunk_count",
+            operator=">=",
+            threshold=1.0,
+            metadata={
+                "description": "Answer should have at least one retrieved source chunk."
+            }
+        ),
+    ],
+}
+
+
+DEFAULT_QUALITY_GATES = QUALITY_GATE_PROFILES[DEFAULT_QUALITY_GATE_PROFILE]
+
+
+def normalize_quality_gate_profile_name(profile_name: Optional[str]) -> str:
+    if profile_name is None:
+        return DEFAULT_QUALITY_GATE_PROFILE
+
+    cleaned_profile_name = profile_name.strip().lower()
+
+    if not cleaned_profile_name:
+        return DEFAULT_QUALITY_GATE_PROFILE
+
+    if cleaned_profile_name not in QUALITY_GATE_PROFILES:
+        supported_profiles = ", ".join(sorted(QUALITY_GATE_PROFILES.keys()))
+
+        raise QualityGateError(
+            f"Unsupported quality gate profile '{profile_name}'. "
+            f"Supported profiles are: {supported_profiles}"
+        )
+
+    return cleaned_profile_name
+
+
+def get_quality_gate_profiles() -> dict[str, list[dict[str, Any]]]:
+    return {
+        profile_name: [
+            {
+                "name": gate.name,
+                "metric_name": gate.metric_name,
+                "operator": gate.operator,
+                "threshold": gate.threshold,
+                "metadata": gate.metadata
+            }
+            for gate in gates
+        ]
+        for profile_name, gates in QUALITY_GATE_PROFILES.items()
+    }
+
+
+def get_quality_gates_for_profile(profile_name: Optional[str]) -> list[DefaultQualityGate]:
+    resolved_profile_name = normalize_quality_gate_profile_name(profile_name)
+
+    return QUALITY_GATE_PROFILES[resolved_profile_name]
+
+
+def gate_id_for_profile_gate(profile_name: str, gate: DefaultQualityGate) -> str:
+    normalized_name = (
+        gate.name
+        .lower()
+        .replace(" ", "-")
+        .replace("_", "-")
+    )
+
+    return f"{profile_name}:{normalized_name}"
+
 
 def ensure_default_quality_gates(db: Session) -> int:
     created_count = 0
@@ -125,7 +304,10 @@ def ensure_default_quality_gates(db: Session) -> int:
                 operator=gate.operator,
                 threshold=gate.threshold,
                 is_active=True,
-                metadata_json=gate.metadata
+                metadata_json={
+                    **gate.metadata,
+                    "quality_gate_profile": DEFAULT_QUALITY_GATE_PROFILE
+                }
             )
         )
 
@@ -136,11 +318,15 @@ def ensure_default_quality_gates(db: Session) -> int:
     logger.info("Created %s default quality gates", created_count)
     return created_count
 
+
 def evaluate_quality_gates(
     db: Session,
     run_id: str,
-    persist: bool = True
+    persist: bool = True,
+    profile_name: Optional[str] = DEFAULT_QUALITY_GATE_PROFILE
 ) -> QualityGateSummary:
+    resolved_profile_name = normalize_quality_gate_profile_name(profile_name)
+
     run = db.get(Run, run_id)
 
     if run is None:
@@ -150,8 +336,6 @@ def evaluate_quality_gates(
         raise QualityGateError(
             f"Run '{run_id}' must be completed before quality gates can run"
         )
-
-    ensure_default_quality_gates(db)
 
     metric_values = get_metric_values(db, run_id)
 
@@ -163,18 +347,16 @@ def evaluate_quality_gates(
 
         metric_values = get_metric_values(db, run_id)
 
-    active_gates = db.execute(
-        select(QualityGate)
-        .where(QualityGate.is_active.is_(True))
-        .order_by(QualityGate.created_at.asc())
-    ).scalars().all()
+    gates = get_quality_gates_for_profile(resolved_profile_name)
 
-    if not active_gates:
-        raise QualityGateError("No active quality gates found")
+    if not gates:
+        raise QualityGateError(
+            f"No quality gates found for profile '{resolved_profile_name}'"
+        )
 
     checks: list[QualityGateCheck] = []
 
-    for gate in active_gates:
+    for gate in gates:
         if gate.metric_name not in metric_values:
             raise QualityGateError(
                 f"Metric '{gate.metric_name}' required by gate "
@@ -190,7 +372,7 @@ def evaluate_quality_gates(
 
         checks.append(
             QualityGateCheck(
-                gate_id=gate.id,
+                gate_id=gate_id_for_profile_gate(resolved_profile_name, gate),
                 gate_name=gate.name,
                 metric_name=gate.metric_name,
                 metric_value=metric_value,
@@ -207,6 +389,7 @@ def evaluate_quality_gates(
 
     summary = QualityGateSummary(
         run_id=run_id,
+        profile_name=resolved_profile_name,
         overall_passed=overall_passed,
         passed_count=passed_count,
         failed_count=failed_count,
@@ -219,12 +402,15 @@ def evaluate_quality_gates(
         save_quality_gate_summary(db, run, summary)
 
     logger.info(
-        "Quality gates evaluated for run %s: %s/%s passed",
+        "Quality gates evaluated for run %s using profile %s: %s/%s passed",
         run_id,
+        resolved_profile_name,
         passed_count,
         len(checks)
     )
+
     return summary
+
 
 def get_metric_values(db: Session, run_id: str) -> dict[str, float]:
     results = db.execute(
@@ -240,6 +426,7 @@ def get_metric_values(db: Session, run_id: str) -> dict[str, float]:
         for result in results
     }
 
+
 def compare_metric(metric_value: float, operator: str, threshold: float) -> bool:
     if operator == ">=":
         return metric_value >= threshold
@@ -253,6 +440,7 @@ def compare_metric(metric_value: float, operator: str, threshold: float) -> bool
         return metric_value == threshold
 
     raise ValueError(f"Unsupported quality gate operator: {operator}")
+
 
 def save_quality_gate_summary(
     db: Session,
@@ -290,6 +478,7 @@ def save_quality_gate_summary(
             metric_value=1.0 if summary.overall_passed else 0.0,
             evaluator_type=QUALITY_GATE_EVALUATOR_TYPE,
             details_json={
+                "quality_gate_profile": summary.profile_name,
                 "checks": check_details
             }
         )
@@ -302,6 +491,7 @@ def save_quality_gate_summary(
             metric_value=summary.pass_rate,
             evaluator_type=QUALITY_GATE_EVALUATOR_TYPE,
             details_json={
+                "quality_gate_profile": summary.profile_name,
                 "passed_count": summary.passed_count,
                 "failed_count": summary.failed_count,
                 "total_gates": summary.total_gates
@@ -316,6 +506,7 @@ def save_quality_gate_summary(
             metric_value=float(summary.failed_count),
             evaluator_type=QUALITY_GATE_EVALUATOR_TYPE,
             details_json={
+                "quality_gate_profile": summary.profile_name,
                 "failed_gates": [
                     check.gate_name
                     for check in summary.checks
@@ -327,6 +518,7 @@ def save_quality_gate_summary(
 
     run.metadata_json = {
         **(run.metadata_json or {}),
+        "quality_gate_profile": summary.profile_name,
         "quality_gate_overall_pass": summary.overall_passed,
         "quality_gate_pass_rate": summary.pass_rate,
         "quality_gate_failed_count": summary.failed_count
