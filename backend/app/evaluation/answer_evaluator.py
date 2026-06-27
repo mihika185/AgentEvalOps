@@ -324,12 +324,119 @@ def extract_keywords(text: str) -> set[str]:
         "a", "an", "the", "is", "are", "was", "were", "do", "does", "did","can", "could", "should", "would", 
         "i", "you", "we", "they", "he", "she", "it", "this", "that", "these", "those", "to", "for", "of","in", 
         "on", "at", "by", "with", "and", "or", "but", "from", "as","get", "be", "what", "when", "where", "who", 
-        "whom", "whose", "why", "how", "tell", "me", "about", "please", "policy", "policies", "company"
+        "whom", "whose", "why", "how", "tell", "me", "about", "please", "policy", "policies", "company", "may",
+        "must", "does"
     }
 
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
 
-    return {token for token in tokens if token not in stop_words}
+    keywords = set()
+
+    for token in tokens:
+        normalized_token = normalize_keyword(token)
+
+        if not normalized_token:
+            continue
+
+        if normalized_token in stop_words:
+            continue
+
+        keywords.add(normalized_token)
+
+    return keywords
+
+
+def normalize_keyword(token: str) -> str:
+    synonym_map = {
+        "customers": "customer",
+        "customer": "customer",
+        "products": "product",
+        "product": "product",
+        "subscriptions": "subscription",
+        "subscription": "subscription",
+        "cancellations": "cancellation",
+        "cancellation": "cancellation",
+        "payments": "payment",
+        "payment": "payment",
+        "charges": "charge",
+        "charge": "charge",
+        "days": "day",
+        "day": "day",
+        "hours": "hour",
+        "hour": "hour",
+        "times": "time",
+        "time": "time",
+        "usually": "usual",
+        "usual": "usual",
+        "reporting": "report",
+        "reported": "report",
+        "reports": "report",
+        "report": "report",
+        "damaged": "damage",
+        "damage": "damage",
+        "defective": "defect",
+        "defects": "defect",
+        "defect": "defect",
+        "accessories": "accessory",
+        "accessory": "accessory",
+        "repairs": "repair",
+        "repaired": "repair",
+        "repair": "repair",
+        "excludes": "cover",
+        "excluded": "cover",
+        "exclude": "cover",
+        "exclusion": "cover",
+        "coverage": "cover",
+        "covered": "cover",
+        "covering": "cover",
+        "cover": "cover",
+        "provides": "provide",
+        "provided": "provide",
+        "providing": "provide",
+        "provide": "provide",
+        "includes": "include",
+        "included": "include",
+        "including": "include",
+        "include": "include",
+        "renewals": "renewal",
+        "renewal": "renewal",
+        "retries": "retry",
+        "retrying": "retry",
+        "retry": "retry",
+        "addresses": "address",
+        "address": "address",
+        "invoices": "invoice",
+        "invoice": "invoice",
+        "records": "record",
+        "record": "record",
+    }
+
+    if token in synonym_map:
+        return synonym_map[token]
+
+    if len(token) > 5 and token.endswith("ies"):
+        return token[:-3] + "y"
+
+    if len(token) > 5 and token.endswith("ing"):
+        return token[:-3]
+
+    if len(token) > 4 and token.endswith("ed"):
+        return token[:-2]
+
+    if len(token) > 4 and token.endswith("ly"):
+        return token[:-2]
+
+    if (
+        len(token) > 4
+        and token.endswith("es")
+        and token.endswith(("ches", "shes", "xes", "zes", "ses"))
+    ):
+        return token[:-2]
+
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+
+    return token
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
