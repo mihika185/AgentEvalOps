@@ -12,6 +12,7 @@ DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_POLICY_PATH = "sample_data/apexcart_customer_operations_policy.md"
 
 DATASET_NAME = "ApexCart Policy Reliability Benchmark"
+SEED_SCRIPT_NAME = "scripts/seed_apexcart_benchmark.py"
 
 PIPELINE_TOPK3_NAME = "MiniLM Extractive top-k-3"
 PIPELINE_TOPK5_NAME = "MiniLM Extractive top-k-5"
@@ -147,6 +148,61 @@ def upload_document(
     return str(document_id)
 
 
+def list_datasets(
+    client: httpx.Client,
+    base_url: str,
+) -> list[dict[str, Any]]:
+    payload = request_json(
+        client,
+        "GET",
+        f"{base_url}/api/v1/benchmarks/datasets",
+    )
+
+    if isinstance(payload, list):
+        return payload
+
+    if isinstance(payload, dict):
+        for key in ("items", "datasets", "data"):
+            value = payload.get(key)
+
+            if isinstance(value, list):
+                return value
+
+    return []
+
+
+def find_seeded_dataset(
+    datasets: list[dict[str, Any]],
+) -> tuple[str, str] | None:
+    matching_datasets: list[dict[str, Any]] = []
+
+    for dataset in datasets:
+        metadata = dataset.get("metadata_json") or {}
+
+        if dataset.get("name") != DATASET_NAME:
+            continue
+
+        if metadata.get("seeded_by") != SEED_SCRIPT_NAME:
+            continue
+
+        if not dataset.get("id") or not dataset.get("document_id"):
+            continue
+
+        matching_datasets.append(dataset)
+
+    if not matching_datasets:
+        return None
+
+    matching_datasets.sort(
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
+
+    latest_dataset = matching_datasets[0]
+
+    return str(latest_dataset["id"]), str(latest_dataset["document_id"])
+
+
 def create_dataset(
     client: httpx.Client,
     base_url: str,
@@ -166,7 +222,7 @@ def create_dataset(
             "metadata_json": {
                 "corpus_type": "synthetic_enterprise_policy",
                 "purpose": "rag_reliability_evaluation",
-                "seeded_by": "scripts/seed_apexcart_benchmark.py",
+                "seeded_by": SEED_SCRIPT_NAME,
             },
         },
     )
@@ -179,18 +235,103 @@ def create_dataset(
     return str(dataset_id)
 
 
+def get_or_create_dataset(
+    client: httpx.Client,
+    base_url: str,
+    policy_path: Path,
+) -> tuple[str, str]:
+    datasets = list_datasets(client, base_url)
+    existing_dataset = find_seeded_dataset(datasets)
+
+    if existing_dataset:
+        dataset_id, document_id = existing_dataset
+
+        print(f"Reusing existing benchmark dataset: {dataset_id}")
+        print(f"Reusing existing indexed document: {document_id}")
+
+        return document_id, dataset_id
+
+    print("No seeded benchmark dataset found.")
+    print("Uploading and indexing policy document...")
+
+    document_id = upload_document(
+        client=client,
+        base_url=base_url,
+        policy_path=policy_path,
+    )
+
+    print("Creating benchmark dataset...")
+
+    dataset_id = create_dataset(
+        client=client,
+        base_url=base_url,
+        document_id=document_id,
+    )
+
+    return document_id, dataset_id
+
+
+def list_test_cases(
+    client: httpx.Client,
+    base_url: str,
+    dataset_id: str,
+) -> list[dict[str, Any]]:
+    payload = request_json(
+        client,
+        "GET",
+        f"{base_url}/api/v1/benchmarks/datasets/{dataset_id}/test-cases",
+    )
+
+    if isinstance(payload, list):
+        return payload
+
+    if isinstance(payload, dict):
+        for key in ("items", "test_cases", "cases", "data"):
+            value = payload.get(key)
+
+            if isinstance(value, list):
+                return value
+
+    return []
+
+
 def add_test_cases(
     client: httpx.Client,
     base_url: str,
     dataset_id: str,
 ) -> None:
+    existing_cases = list_test_cases(
+        client=client,
+        base_url=base_url,
+        dataset_id=dataset_id,
+    )
+
+    existing_questions = {
+        str(test_case.get("question"))
+        for test_case in existing_cases
+        if test_case.get("question")
+    }
+
+    created_count = 0
+    skipped_count = 0
+
     for test_case in TEST_CASES:
+        question = test_case["question"]
+
+        if question in existing_questions:
+            skipped_count += 1
+            continue
+
         request_json(
             client,
             "POST",
             f"{base_url}/api/v1/benchmarks/datasets/{dataset_id}/test-cases",
             json=test_case,
         )
+
+        created_count += 1
+
+    print(f"Benchmark test cases: {created_count} created, {skipped_count} skipped.")
 
 
 def list_pipeline_configs(
@@ -253,7 +394,7 @@ def create_pipeline_config(
             "is_active": True,
             "metadata_json": {
                 "purpose": "apexcart_benchmark_comparison",
-                "seeded_by": "scripts/seed_apexcart_benchmark.py",
+                "seeded_by": SEED_SCRIPT_NAME,
             },
         },
     )
@@ -378,13 +519,13 @@ def main() -> None:
         )
 
     with httpx.Client(timeout=60.0) as client:
-        print("Uploading and indexing policy document...")
-        document_id = upload_document(client, base_url, policy_path)
+        document_id, dataset_id = get_or_create_dataset(
+            client=client,
+            base_url=base_url,
+            policy_path=policy_path,
+        )
 
-        print("Creating benchmark dataset...")
-        dataset_id = create_dataset(client, base_url, document_id)
-
-        print("Adding benchmark test cases...")
+        print("Ensuring benchmark test cases...")
         add_test_cases(client, base_url, dataset_id)
 
         print("Ensuring pipeline configs...")
