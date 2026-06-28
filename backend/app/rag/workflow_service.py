@@ -15,7 +15,7 @@ from backend.app.observability.run_recorder import (
 )
 from backend.app.rag.answer_service import AnswerGenerator, SourceChunk
 from backend.app.rag.llm_answer_generator import get_default_answer_generator
-from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_relevant_chunks
+from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_chunks
 from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
 from backend.app.evaluation.quality_gates import (
     DEFAULT_QUALITY_GATE_PROFILE,
@@ -34,6 +34,7 @@ class ObservableRAGAnswerResult:
     run_id: str
     query: str
     answer: str
+    retrieval_provider: str
     source_chunks: list[SourceChunk]
     retrieval_top_k: int
     document_id: Optional[str]
@@ -51,6 +52,7 @@ def run_rag_answer_workflow(
     query: str,
     top_k: int = settings.default_retrieval_top_k,
     document_id: Optional[str] = None,
+    retrieval_provider: str = "dense",
     answer_generator: Optional[AnswerGenerator] = None,
     quality_gate_profile: str = DEFAULT_QUALITY_GATE_PROFILE
 ) -> ObservableRAGAnswerResult:
@@ -64,6 +66,8 @@ def run_rag_answer_workflow(
         raise RAGWorkflowError(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
         )
+    
+    resolved_retrieval_provider = normalize_retrieval_provider(retrieval_provider)
     
     try:
         resolved_quality_gate_profile = normalize_quality_gate_profile_name(
@@ -83,6 +87,7 @@ def run_rag_answer_workflow(
             metadata={
                 "document_id": document_id,
                 "top_k": top_k,
+                "retrieval_provider": resolved_retrieval_provider,
                 "quality_gate_profile": resolved_quality_gate_profile,
                 "workflow_version": "rag-answer-v1"
             }
@@ -100,7 +105,8 @@ def run_rag_answer_workflow(
                 step_type="validation",
                 name="validate_document_scope",
                 input_data={
-                    "document_id": document_id
+                    "document_id": document_id,
+                    "retrieval_provider": resolved_retrieval_provider
                 },
                 output_data={},
                 status="failed",
@@ -121,10 +127,12 @@ def run_rag_answer_workflow(
 
         retrieval_start = time.perf_counter()
 
-        retrieval_result = retrieve_relevant_chunks(
+        retrieval_result = retrieve_chunks(
             query=cleaned_query,
             top_k=top_k,
-            document_id=document_id
+            document_id=document_id,
+            method=resolved_retrieval_provider,
+            db = db
         )
 
         retrieval_latency_ms = elapsed_ms(retrieval_start)
@@ -151,6 +159,7 @@ def run_rag_answer_workflow(
                     for chunk in retrieval_result.chunks
                 ],
                 "retrieved_count": len(retrieval_result.chunks),
+                "retrieval_method": retrieval_result.retrieval_method,
                 "collection_name": retrieval_result.collection_name,
                 "embedding_provider": retrieval_result.embedding_provider,
                 "embedding_model": retrieval_result.embedding_model
@@ -208,6 +217,7 @@ def run_rag_answer_workflow(
             metadata={
                 "document_id": document_id,
                 "retrieval_top_k": top_k,
+                "retrieval_provider": retrieval_result.retrieval_method,
                 "source_chunk_count": len(source_chunks),
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
@@ -333,6 +343,7 @@ def run_rag_answer_workflow(
             metadata={
                 "document_id": document_id,
                 "retrieval_top_k": top_k,
+                "retrieval_provider": retrieval_result.retrieval_method,
                 "source_chunk_count": len(source_chunks),
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
@@ -358,6 +369,7 @@ def run_rag_answer_workflow(
             run_id=run_id,
             query=cleaned_query,
             answer=final_answer,
+            retrieval_provider=retrieval_result.retrieval_method,
             source_chunks=source_chunks,
             retrieval_top_k=top_k,
             document_id=document_id,
@@ -395,6 +407,16 @@ def run_rag_answer_workflow(
         )
 
         raise RAGWorkflowError("Failed to run RAG answer workflow") from exc
+    
+def normalize_retrieval_provider(provider: str) -> str:
+    cleaned_provider = provider.strip().lower()
+    if cleaned_provider in {"dense", "qdrant_vector_search", "vector"}:
+        return "dense"
+    if cleaned_provider in {"bm25", "keyword"}:
+        return "bm25"
+    if cleaned_provider in {"hybrid", "hybrid_retrieval"}:
+        return "hybrid"
+    raise RAGWorkflowError(f"Unsupported retrieval provider: {provider}")
 
 def elapsed_ms(start_time: float) -> int:
     return int((time.perf_counter() - start_time) * 1000)

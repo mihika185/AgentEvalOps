@@ -1,36 +1,33 @@
-from typing import Annotated, Any, Optional
-
+from typing import Annotated, Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
-from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
 from backend.app.database.connection import get_db
-from backend.app.rag.workflow_service import (
-    RAGWorkflowError,
-    run_rag_answer_workflow,
-)
+from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
+from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
 
 router = APIRouter(
     prefix="/rag",
-    tags=["RAG"]
+    tags=["RAG"],
 )
 
+RetrievalProvider = Literal["dense", "bm25", "hybrid"]
 
 class RAGAnswerRequest(BaseModel):
     query: str = Field(..., min_length=1)
     top_k: int = Field(
         default=settings.default_retrieval_top_k,
         ge=1,
-        le=settings.max_retrieval_top_k
+        le=settings.max_retrieval_top_k,
     )
     document_id: Optional[str] = None
+    retrieval_provider: RetrievalProvider = "dense"
     quality_gate_profile: str = Field(
         default=DEFAULT_QUALITY_GATE_PROFILE,
-        min_length=1
+        min_length=1,
     )
-
 
 class SourceChunkResponse(BaseModel):
     chunk_id: str
@@ -39,17 +36,16 @@ class SourceChunkResponse(BaseModel):
     text: str
     metadata: dict[str, Any]
 
-
 class EvaluationMetricResponse(BaseModel):
     metric_name: str
     metric_value: float
     details: dict[str, Any]
 
-
 class RAGAnswerResponse(BaseModel):
     run_id: str
     query: str
     answer: str
+    retrieval_provider: str
     source_chunks: list[SourceChunkResponse]
     retrieval_top_k: int
     document_id: Optional[str]
@@ -62,11 +58,10 @@ class RAGAnswerResponse(BaseModel):
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
 
-
 @router.post("/answer", response_model=RAGAnswerResponse)
 def generate_rag_answer(
     payload: RAGAnswerRequest,
-    db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_db)],
 ):
     try:
         result = run_rag_answer_workflow(
@@ -74,20 +69,21 @@ def generate_rag_answer(
             query=payload.query,
             top_k=payload.top_k,
             document_id=payload.document_id,
-            quality_gate_profile=payload.quality_gate_profile
+            retrieval_provider=payload.retrieval_provider,
+            quality_gate_profile=payload.quality_gate_profile,
         )
-
         return RAGAnswerResponse(
             run_id=result.run_id,
             query=result.query,
             answer=result.answer,
+            retrieval_provider=result.retrieval_provider,
             source_chunks=[
                 SourceChunkResponse(
                     chunk_id=source.chunk_id,
                     document_id=source.document_id,
                     score=source.score,
                     text=source.text,
-                    metadata=source.metadata
+                    metadata=source.metadata,
                 )
                 for source in result.source_chunks
             ],
@@ -99,7 +95,7 @@ def generate_rag_answer(
                 EvaluationMetricResponse(
                     metric_name=metric.metric_name,
                     metric_value=metric.metric_value,
-                    details=metric.details
+                    details=metric.details,
                 )
                 for metric in result.evaluation_metrics
             ],
@@ -107,11 +103,10 @@ def generate_rag_answer(
             quality_gate_passed=result.quality_gate_passed,
             quality_gate_pass_rate=result.quality_gate_pass_rate,
             failed_quality_gates=result.failed_quality_gates,
-            response_blocked_by_quality_gate=result.response_blocked_by_quality_gate
+            response_blocked_by_quality_gate=result.response_blocked_by_quality_gate,
         )
-
     except RAGWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc)
+            detail=str(exc),
         ) from exc
