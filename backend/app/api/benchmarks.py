@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
@@ -26,9 +25,7 @@ router = APIRouter(
     tags=["Benchmarks"]
 )
 
-
 ExpectedBehavior = Literal["answerable", "unanswerable"]
-
 
 class BenchmarkDatasetCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -41,7 +38,6 @@ class BenchmarkDatasetCreateRequest(BaseModel):
     def clean_name(cls, value: str) -> str:
         return value.strip()
 
-
 class BenchmarkDatasetUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
@@ -53,7 +49,6 @@ class BenchmarkDatasetUpdateRequest(BaseModel):
     def clean_name(cls, value: Optional[str]) -> Optional[str]:
         return value.strip() if value is not None else value
 
-
 class BenchmarkDatasetResponse(BaseModel):
     id: str
     name: str
@@ -62,7 +57,6 @@ class BenchmarkDatasetResponse(BaseModel):
     metadata_json: dict[str, Any]
     created_at: datetime
     updated_at: datetime
-
 
 class BenchmarkTestCaseCreateRequest(BaseModel):
     question: str = Field(..., min_length=1)
@@ -94,7 +88,6 @@ class BenchmarkTestCaseCreateRequest(BaseModel):
             for value in values
             if value.strip()
         ]
-
 
 class BenchmarkTestCaseUpdateRequest(BaseModel):
     question: Optional[str] = Field(default=None, min_length=1)
@@ -136,7 +129,6 @@ class BenchmarkTestCaseUpdateRequest(BaseModel):
             if value.strip()
         ]
 
-
 class BenchmarkTestCaseResponse(BaseModel):
     id: str
     dataset_id: str
@@ -149,10 +141,8 @@ class BenchmarkTestCaseResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-
 class BenchmarkDatasetDetailResponse(BenchmarkDatasetResponse):
     test_cases: list[BenchmarkTestCaseResponse]
-
 
 class BenchmarkRunItemResponse(BaseModel):
     id: str
@@ -172,7 +162,6 @@ class BenchmarkRunItemResponse(BaseModel):
     latency_ms: Optional[int]
     metadata_json: dict[str, Any]
     created_at: datetime
-
 
 class BenchmarkRunResponse(BaseModel):
     id: str
@@ -202,20 +191,16 @@ class BenchmarkRunResponse(BaseModel):
     started_at: datetime
     completed_at: Optional[datetime]
 
-
 class BenchmarkRunDetailResponse(BenchmarkRunResponse):
     items: list[BenchmarkRunItemResponse]
 
-
 class BenchmarkComparisonRequest(BaseModel):
     pipeline_config_ids: list[str] = Field(..., min_length=1, max_length=5)
-
 
 class PipelineBenchmarkResultResponse(BaseModel):
     pipeline_config_id: str
     pipeline_config_name: str
     benchmark_run: BenchmarkRunDetailResponse
-
 
 class BenchmarkComparisonResponse(BaseModel):
     dataset_id: str
@@ -241,7 +226,6 @@ class BenchmarkFailureItemResponse(BaseModel):
     pipeline_config_id: Optional[str]
     pipeline_config_name: Optional[str]
 
-
 class BenchmarkFailureAnalysisResponse(BaseModel):
     benchmark_run_id: str
     dataset_id: str
@@ -262,7 +246,6 @@ def get_dataset_or_404(dataset_id: str, db: Session) -> BenchmarkDataset:
 
     return dataset
 
-
 def get_test_case_or_404(test_case_id: str, db: Session) -> BenchmarkTestCase:
     test_case = db.get(BenchmarkTestCase, test_case_id)
 
@@ -273,7 +256,6 @@ def get_test_case_or_404(test_case_id: str, db: Session) -> BenchmarkTestCase:
         )
 
     return test_case
-
 
 def ensure_document_exists(document_id: Optional[str], db: Session) -> None:
     if document_id is None:
@@ -328,10 +310,12 @@ def execute_benchmark_run(
     pipeline_config: Optional[PipelineConfig] = None
 ) -> tuple[BenchmarkRun, list[BenchmarkRunItem]]:
     resolved_quality_gate_profile = DEFAULT_QUALITY_GATE_PROFILE
+    resolved_retrieval_provider = "dense"
 
     benchmark_metadata = {
         "dataset_name": dataset.name,
         "top_k": top_k,
+        "retrieval_provider": resolved_retrieval_provider,
         "quality_gate_profile": resolved_quality_gate_profile,
         "runner_version": "benchmark-runner-v1"
     }
@@ -340,6 +324,7 @@ def execute_benchmark_run(
 
     if pipeline_config is not None:
         resolved_quality_gate_profile = pipeline_config.quality_gate_profile
+        resolved_retrieval_provider = pipeline_config.retrieval_provider
         answer_generator = answer_generator_from_pipeline_config(pipeline_config)
 
         benchmark_metadata = {
@@ -374,6 +359,7 @@ def execute_benchmark_run(
                 query=test_case.question,
                 top_k=top_k,
                 document_id=test_case.document_id or dataset.document_id,
+                retrieval_provider=resolved_retrieval_provider,
                 answer_generator=answer_generator,
                 quality_gate_profile=resolved_quality_gate_profile
             )
@@ -409,6 +395,7 @@ def execute_benchmark_run(
                     "tags": test_case.tags,
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
+                    "retrieval_provider": result.retrieval_provider,
                     "quality_gate_profile": result.quality_gate_profile,
                 }
             )
@@ -435,6 +422,7 @@ def execute_benchmark_run(
                     "tags": test_case.tags,
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
+                    "retrieval_provider": resolved_retrieval_provider,
                     "error_type": "RAGWorkflowError",
                     "quality_gate_profile": resolved_quality_gate_profile,
                 }
@@ -481,7 +469,6 @@ def create_dataset(
 
     return to_dataset_response(dataset)
 
-
 @router.get(
         "/datasets", 
         response_model=list[BenchmarkDatasetResponse]
@@ -504,7 +491,6 @@ def list_datasets(
         to_dataset_response(dataset)
         for dataset in datasets
     ]
-
 
 @router.get(
         "/datasets/{dataset_id}",
@@ -532,7 +518,6 @@ def get_dataset(
         ]
     )
 
-
 @router.patch(
         "/datasets/{dataset_id}",
         response_model=BenchmarkDatasetResponse
@@ -557,7 +542,6 @@ def update_dataset(
 
     return to_dataset_response(dataset)
 
-
 @router.delete(
         "/datasets/{dataset_id}",
         status_code=status.HTTP_204_NO_CONTENT
@@ -572,7 +556,6 @@ def delete_dataset(
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
 
 @router.post(
     "/datasets/{dataset_id}/test-cases",
@@ -612,7 +595,6 @@ def create_test_case(
 
     return to_test_case_response(test_case)
 
-
 @router.get(
     "/datasets/{dataset_id}/test-cases",
     response_model=list[BenchmarkTestCaseResponse]
@@ -635,7 +617,6 @@ def list_test_cases(
         to_test_case_response(test_case)
         for test_case in test_cases
     ]
-
 
 @router.patch(
         "/test-cases/{test_case_id}", 
@@ -676,7 +657,6 @@ def update_test_case(
 
     return to_test_case_response(test_case)
 
-
 @router.delete(
         "/test-cases/{test_case_id}",
         status_code=status.HTTP_204_NO_CONTENT
@@ -691,7 +671,6 @@ def delete_test_case(
     db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
-
 
 @router.post(
     "/datasets/{dataset_id}/runs",
@@ -728,7 +707,6 @@ def run_benchmark_dataset(
         benchmark_run=benchmark_run,
         run_items=run_items
     )
-
 
 @router.post(
     "/datasets/{dataset_id}/compare",
@@ -808,7 +786,6 @@ def compare_pipeline_configs_on_dataset(
         selection_reason=selection_reason,
         results=results
     )
-
 
 @router.get(
         "/runs",
@@ -928,13 +905,11 @@ def metric_value(metrics: dict[str, float], name: str) -> Optional[float]:
 
     return float(value)
 
-
 def average(values: list[float]) -> Optional[float]:
     if not values:
         return None
 
     return round(sum(values) / len(values), 4)
-
 
 def keyword_missing_from_answer(
     answer: str,
@@ -947,7 +922,6 @@ def keyword_missing_from_answer(
         for keyword in expected_keywords
         if keyword.lower() not in normalized_answer
     ]
-
 
 def judge_benchmark_case(
     expected_behavior: str,
@@ -983,7 +957,6 @@ def judge_benchmark_case(
         return False, "Expected unanswerable query to be blocked, but answer was returned"
 
     return False, f"Unsupported expected behavior: {expected_behavior}"
-
 
 def to_metrics_dict(result) -> dict[str, float]:
     return {
@@ -1088,7 +1061,6 @@ def build_failure_summary(
         f"with {top_count} case(s)."
     )
 
-
 def to_failure_item_response(
     item: BenchmarkRunItem
 ) -> BenchmarkFailureItemResponse:
@@ -1120,7 +1092,6 @@ def to_source_chunks_json(result) -> list[dict[str, Any]]:
         for chunk in result.source_chunks
     ]
 
-
 def to_dataset_response(dataset: BenchmarkDataset) -> BenchmarkDatasetResponse:
     return BenchmarkDatasetResponse(
         id=dataset.id,
@@ -1131,7 +1102,6 @@ def to_dataset_response(dataset: BenchmarkDataset) -> BenchmarkDatasetResponse:
         created_at=dataset.created_at,
         updated_at=dataset.updated_at
     )
-
 
 def to_test_case_response(test_case: BenchmarkTestCase) -> BenchmarkTestCaseResponse:
     return BenchmarkTestCaseResponse(
@@ -1146,7 +1116,6 @@ def to_test_case_response(test_case: BenchmarkTestCase) -> BenchmarkTestCaseResp
         created_at=test_case.created_at,
         updated_at=test_case.updated_at
     )
-
 
 def finalize_benchmark_run(
     db: Session,

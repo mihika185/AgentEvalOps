@@ -16,6 +16,8 @@ SEED_SCRIPT_NAME = "scripts/seed_apexcart_benchmark.py"
 
 PIPELINE_TOPK3_NAME = "MiniLM Extractive top-k-3"
 PIPELINE_TOPK5_NAME = "MiniLM Extractive top-k-5"
+PIPELINE_BM25_TOPK5_NAME = "BM25 Extractive top-k-5"
+PIPELINE_HYBRID_TOPK5_NAME = "Hybrid Extractive top-k-5"
 
 
 TEST_CASES = [
@@ -372,7 +374,10 @@ def create_pipeline_config(
     client: httpx.Client,
     base_url: str,
     name: str,
+    description: str,
+    retrieval_provider: str,
     top_k: int,
+    metadata_json: dict[str, Any],
 ) -> str:
     payload = request_json(
         client,
@@ -380,11 +385,8 @@ def create_pipeline_config(
         f"{base_url}/api/v1/pipeline-configs",
         json={
             "name": name,
-            "description": (
-                f"Default extractive RAG pipeline using MiniLM embeddings "
-                f"and top-k {top_k} retrieval."
-            ),
-            "retrieval_provider": "qdrant_vector_search",
+            "description": description,
+            "retrieval_provider": retrieval_provider,
             "top_k": top_k,
             "answer_generator_provider": "extractive",
             "answer_generator_model": "simple-extractive-v2",
@@ -393,7 +395,7 @@ def create_pipeline_config(
             "quality_gate_profile": "default-v1",
             "is_active": True,
             "metadata_json": {
-                "purpose": "apexcart_benchmark_comparison",
+                **metadata_json,
                 "seeded_by": SEED_SCRIPT_NAME,
             },
         },
@@ -411,7 +413,10 @@ def ensure_pipeline_config(
     client: httpx.Client,
     base_url: str,
     name: str,
+    description: str,
+    retrieval_provider: str,
     top_k: int,
+    metadata_json: dict[str, Any],
 ) -> str:
     configs = list_pipeline_configs(client, base_url)
     existing_id = find_pipeline_config_id(configs, name)
@@ -423,7 +428,10 @@ def ensure_pipeline_config(
         client=client,
         base_url=base_url,
         name=name,
+        description=description,
+        retrieval_provider=retrieval_provider,
         top_k=top_k,
+        metadata_json=metadata_json,
     )
 
 
@@ -449,15 +457,17 @@ def run_comparison(
 def print_summary(
     document_id: str,
     dataset_id: str,
-    topk3_id: str,
-    topk5_id: str,
+    pipeline_ids: dict[str, str],
     comparison: dict[str, Any],
 ) -> None:
     print("\nSeed completed successfully.")
     print(f"Document ID: {document_id}")
     print(f"Dataset ID: {dataset_id}")
-    print(f"Top-k-3 pipeline ID: {topk3_id}")
-    print(f"Top-k-5 pipeline ID: {topk5_id}")
+
+    print("\nPipeline IDs:")
+
+    for name, config_id in pipeline_ids.items():
+        print(f"- {name}: {config_id}")
 
     print("\nComparison result:")
     print(f"Best pipeline: {comparison.get('best_pipeline_config_name')}")
@@ -468,13 +478,15 @@ def print_summary(
 
     for result in comparison.get("results", []):
         run = result.get("benchmark_run", {})
+        run_metadata = run.get("metadata_json") or {}
 
         print(
-            "- {name}: {passed}/{total} passed, "
+            "- {name} [{provider}]: {passed}/{total} passed, "
             "answerable={answerable_passed}/{answerable_total}, "
             "unanswerable={unanswerable_passed}/{unanswerable_total}, "
-            "pass_rate={pass_rate}".format(
+            "pass_rate={pass_rate}, avg_quality={avg_quality}".format(
                 name=result.get("pipeline_config_name"),
+                provider=run_metadata.get("retrieval_provider"),
                 passed=run.get("passed_cases"),
                 total=run.get("total_cases"),
                 answerable_passed=run.get("answerable_passed"),
@@ -482,6 +494,7 @@ def print_summary(
                 unanswerable_passed=run.get("unanswerable_passed"),
                 unanswerable_total=run.get("unanswerable_cases"),
                 pass_rate=run.get("pass_rate"),
+                avg_quality=run.get("average_overall_quality_score"),
             )
         )
 
@@ -529,18 +542,72 @@ def main() -> None:
         add_test_cases(client, base_url, dataset_id)
 
         print("Ensuring pipeline configs...")
-        topk3_id = ensure_pipeline_config(
+        pipeline_ids = {}
+
+        pipeline_ids[PIPELINE_TOPK3_NAME] = ensure_pipeline_config(
             client=client,
             base_url=base_url,
             name=PIPELINE_TOPK3_NAME,
+            description=(
+                "Baseline dense retrieval pipeline using MiniLM embeddings, "
+                "top_k=3, extractive answer generation, and default quality gates."
+            ),
+            retrieval_provider="qdrant_vector_search",
             top_k=3,
+            metadata_json={
+                "purpose": "baseline",
+                "retrieval_type": "dense",
+                "reranker_enabled": False,
+            },
         )
 
-        topk5_id = ensure_pipeline_config(
+        pipeline_ids[PIPELINE_TOPK5_NAME] = ensure_pipeline_config(
             client=client,
             base_url=base_url,
             name=PIPELINE_TOPK5_NAME,
+            description=(
+                "Wider dense retrieval pipeline using MiniLM embeddings, "
+                "top_k=5, extractive answer generation, and default quality gates."
+            ),
+            retrieval_provider="qdrant_vector_search",
             top_k=5,
+            metadata_json={
+                "purpose": "retrieval_method_comparison",
+                "retrieval_type": "dense",
+                "reranker_enabled": False,
+            },
+        )
+
+        pipeline_ids[PIPELINE_BM25_TOPK5_NAME] = ensure_pipeline_config(
+            client=client,
+            base_url=base_url,
+            name=PIPELINE_BM25_TOPK5_NAME,
+            description=(
+                "Keyword retrieval pipeline using BM25, top_k=5, "
+                "extractive answer generation, and default quality gates."
+            ),
+            retrieval_provider="bm25",
+            top_k=5,
+            metadata_json={
+                "purpose": "retrieval_method_comparison",
+                "retrieval_type": "keyword",
+            },
+        )
+
+        pipeline_ids[PIPELINE_HYBRID_TOPK5_NAME] = ensure_pipeline_config(
+            client=client,
+            base_url=base_url,
+            name=PIPELINE_HYBRID_TOPK5_NAME,
+            description=(
+                "Hybrid dense and BM25 retrieval pipeline, top_k=5, "
+                "extractive answer generation, and default quality gates."
+            ),
+            retrieval_provider="hybrid",
+            top_k=5,
+            metadata_json={
+                "purpose": "retrieval_method_comparison",
+                "retrieval_type": "dense_plus_keyword",
+            },
         )
 
         print("Running benchmark comparison...")
@@ -548,14 +615,17 @@ def main() -> None:
             client=client,
             base_url=base_url,
             dataset_id=dataset_id,
-            pipeline_config_ids=[topk3_id, topk5_id],
+            pipeline_config_ids=[
+                pipeline_ids[PIPELINE_TOPK5_NAME],
+                pipeline_ids[PIPELINE_BM25_TOPK5_NAME],
+                pipeline_ids[PIPELINE_HYBRID_TOPK5_NAME],
+            ],
         )
 
     print_summary(
         document_id=document_id,
         dataset_id=dataset_id,
-        topk3_id=topk3_id,
-        topk5_id=topk5_id,
+        pipeline_ids=pipeline_ids,
         comparison=comparison,
     )
 
