@@ -28,6 +28,8 @@ class RetrievalSearchRequest(BaseModel):
         le=settings.max_retrieval_top_k,
     )
     document_id: Optional[str] = None
+    rerank: bool = False
+    candidate_multiplier: int = Field(default=3, ge=1, le=10)
 
 class RetrievalCompareRequest(BaseModel):
     query: str = Field(..., min_length=1)
@@ -41,6 +43,8 @@ class RetrievalCompareRequest(BaseModel):
         le=settings.max_retrieval_top_k,
     )
     document_id: Optional[str] = None
+    rerank: bool = False
+    candidate_multiplier: int = Field(default=3, ge=1, le=10)
 
     @field_validator("methods")
     @classmethod
@@ -63,11 +67,15 @@ class RetrievalSearchResponse(BaseModel):
     collection_name: str
     embedding_provider: str
     embedding_model: str
+    reranker_used: bool
+    reranker_name: Optional[str]
 
 class RetrievalCompareResponse(BaseModel):
     query: str
     top_k: int
     document_id: Optional[str]
+    rerank: bool
+    candidate_multiplier: int
     results: list[RetrievalSearchResponse]
 
 @router.post("/search", response_model=RetrievalSearchResponse)
@@ -82,6 +90,8 @@ def search_relevant_chunks(
             document_id=payload.document_id,
             method=payload.method,
             db=db,
+            rerank=payload.rerank,
+            candidate_multiplier=payload.candidate_multiplier,
         )
         return to_retrieval_search_response(result)
     except RetrievalError as exc:
@@ -102,11 +112,15 @@ def compare_retrievers(
             top_k=payload.top_k,
             document_id=payload.document_id,
             db=db,
+            rerank=payload.rerank,
+            candidate_multiplier=payload.candidate_multiplier,
         )
         return RetrievalCompareResponse(
             query=payload.query.strip(),
             top_k=payload.top_k,
             document_id=payload.document_id,
+            rerank=payload.rerank,
+            candidate_multiplier=payload.candidate_multiplier,
             results=[to_retrieval_search_response(result) for result in results],
         )
     except RetrievalError as exc:
@@ -134,4 +148,6 @@ def to_retrieval_search_response(result: RetrievalResult) -> RetrievalSearchResp
         collection_name=result.collection_name,
         embedding_provider=result.embedding_provider,
         embedding_model=result.embedding_model,
+        reranker_used=result.reranker_used,
+        reranker_name=result.reranker_name,
     )

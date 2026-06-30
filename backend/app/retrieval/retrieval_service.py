@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal, Optional
 
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from backend.app.embeddings.embedding_provider import (
 )
 from backend.app.logging_config import get_logger
 from backend.app.retrieval.bm25_retriever import BM25ChunkScore, retrieve_bm25_chunks
+from backend.app.retrieval.reranker import rerank_chunks
 from backend.app.vector_store.qdrant_store import QdrantStore, VectorStoreError
 
 logger = get_logger(__name__)
@@ -40,6 +41,8 @@ class RetrievalResult:
     embedding_provider: str
     embedding_model: str
     retrieval_method: str
+    reranker_used: bool = False
+    reranker_name: Optional[str] = None
 
 def retrieve_relevant_chunks(
     query: str,
@@ -47,6 +50,8 @@ def retrieve_relevant_chunks(
     document_id: Optional[str] = None,
     embedding_provider: Optional[EmbeddingProvider] = None,
     vector_store: Optional[QdrantStore] = None,
+    rerank: bool = False,
+    candidate_multiplier: int = 3,
 ) -> RetrievalResult:
     return retrieve_chunks(
         query=query,
@@ -55,6 +60,8 @@ def retrieve_relevant_chunks(
         method="dense",
         embedding_provider=embedding_provider,
         vector_store=vector_store,
+        rerank=rerank,
+        candidate_multiplier=candidate_multiplier,
     )
 
 def retrieve_chunks(
@@ -65,32 +72,62 @@ def retrieve_chunks(
     db: Optional[Session] = None,
     embedding_provider: Optional[EmbeddingProvider] = None,
     vector_store: Optional[QdrantStore] = None,
+    rerank: bool = False,
+    candidate_multiplier: int = 3,
 ) -> RetrievalResult:
     cleaned_query = validate_retrieval_request(query=query, top_k=top_k, method=method)
+    candidate_top_k = resolve_candidate_top_k(
+        top_k=top_k,
+        rerank=rerank,
+        candidate_multiplier=candidate_multiplier,
+    )
+
     if method == "dense":
-        return retrieve_dense_chunks(
+        result = retrieve_dense_chunks(
             query=cleaned_query,
-            top_k=top_k,
+            top_k=candidate_top_k,
             document_id=document_id,
             embedding_provider=embedding_provider,
             vector_store=vector_store,
         )
+        return apply_optional_reranking(
+            result=result,
+            query=cleaned_query,
+            final_top_k=top_k,
+            rerank=rerank,
+        )
+
     if db is None:
         raise RetrievalError(f"Database session is required for {method} retrieval")
+
     if method == "bm25":
-        return retrieve_bm25_result(
+        result = retrieve_bm25_result(
             db=db,
             query=cleaned_query,
-            top_k=top_k,
+            top_k=candidate_top_k,
             document_id=document_id,
         )
-    return retrieve_hybrid_chunks(
+        return apply_optional_reranking(
+            result=result,
+            query=cleaned_query,
+            final_top_k=top_k,
+            rerank=rerank,
+        )
+
+    result = retrieve_hybrid_chunks(
         db=db,
         query=cleaned_query,
-        top_k=top_k,
+        top_k=candidate_top_k,
         document_id=document_id,
         embedding_provider=embedding_provider,
         vector_store=vector_store,
+    )
+
+    return apply_optional_reranking(
+        result=result,
+        query=cleaned_query,
+        final_top_k=top_k,
+        rerank=rerank,
     )
 
 def compare_retrieval_methods(
@@ -99,6 +136,8 @@ def compare_retrieval_methods(
     top_k: int = settings.default_retrieval_top_k,
     document_id: Optional[str] = None,
     db: Optional[Session] = None,
+    rerank: bool = False,
+    candidate_multiplier: int  = 3,
 ) -> list[RetrievalResult]:
     if not methods:
         raise RetrievalError("At least one retrieval method is required")
@@ -111,9 +150,78 @@ def compare_retrieval_methods(
                 document_id=document_id,
                 method=method,
                 db=db,
+                rerank=rerank,
+                candidate_multiplier=candidate_multiplier,
             )
         )
     return results
+
+def resolve_candidate_top_k(
+    top_k: int,
+    rerank: bool,
+    candidate_multiplier: int,
+) -> int:
+    if not rerank:
+        return top_k
+
+    if candidate_multiplier <= 0:
+        raise RetrievalError("candidate_multiplier must be greater than 0")
+
+    return min(
+        settings.max_retrieval_top_k,
+        max(top_k, top_k * candidate_multiplier),
+    )
+
+def apply_optional_reranking(
+    result: RetrievalResult,
+    query: str,
+    final_top_k: int,
+    rerank: bool,
+) -> RetrievalResult:
+    if not rerank:
+        return result
+
+    reranked_items = rerank_chunks(
+        query=query,
+        chunks=result.chunks,
+    )
+
+    reranked_chunks = []
+
+    for rank, item in enumerate(reranked_items[:final_top_k], start=1):
+        chunk = item.chunk
+        metadata = dict(chunk.metadata)
+        actual_reranker_name = item.details.get("reranker_name")
+
+        metadata["reranker_used"] = True
+        metadata["reranker_name"] = actual_reranker_name
+        metadata["rerank_score"] = item.score
+        metadata["rerank_rank"] = rank
+        metadata["rerank_details"] = item.details
+
+        reranked_chunks.append(
+            RetrievedChunk(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                score=item.score,
+                text=chunk.text,
+                metadata=metadata,
+            )
+        )
+
+    result_reranker_name = (
+        reranked_items[0].details.get("reranker_name")
+        if reranked_items
+        else None
+    )
+
+    return replace(
+        result,
+        chunks=reranked_chunks,
+        top_k=final_top_k,
+        reranker_used=True,
+        reranker_name=result_reranker_name,
+    )
 
 def validate_retrieval_request(query: str, top_k: int, method: str) -> str:
     cleaned_query = query.strip()
