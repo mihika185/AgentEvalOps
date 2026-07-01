@@ -22,6 +22,8 @@ class RAGAnswerRequest(BaseModel):
         ge=1,
         le=settings.max_retrieval_top_k,
     )
+    rerank: bool = False
+    candidate_multiplier: int = Field(default=3, ge=1, le=10)
     document_id: Optional[str] = None
     retrieval_provider: RetrievalProvider = "dense"
     quality_gate_profile: str = Field(
@@ -48,8 +50,11 @@ class RAGAnswerResponse(BaseModel):
     retrieval_provider: str
     source_chunks: list[SourceChunkResponse]
     retrieval_top_k: int
+    retrieved_chunk_count: int
     document_id: Optional[str]
     answer_generator: str
+    reranker_used: bool
+    reranker_name: Optional[str]
     total_latency_ms: int
     evaluation_metrics: list[EvaluationMetricResponse]
     quality_gate_profile: str
@@ -71,6 +76,8 @@ def generate_rag_answer(
             document_id=payload.document_id,
             retrieval_provider=payload.retrieval_provider,
             quality_gate_profile=payload.quality_gate_profile,
+            rerank=payload.rerank,
+            candidate_multiplier=payload.candidate_multiplier,
         )
         return RAGAnswerResponse(
             run_id=result.run_id,
@@ -103,6 +110,9 @@ def generate_rag_answer(
             quality_gate_passed=result.quality_gate_passed,
             quality_gate_pass_rate=result.quality_gate_pass_rate,
             failed_quality_gates=result.failed_quality_gates,
+            retrieved_chunk_count=result.retrieved_chunk_count,
+            reranker_used=result.reranker_used,
+            reranker_name=result.reranker_name,
             response_blocked_by_quality_gate=result.response_blocked_by_quality_gate,
         )
     except RAGWorkflowError as exc:

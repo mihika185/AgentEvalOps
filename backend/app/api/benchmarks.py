@@ -302,6 +302,60 @@ def answer_generator_from_pipeline_config(
         )
     )
 
+def metadata_bool_value(
+    metadata: Optional[dict[str, Any]],
+    key: str,
+    default: bool = False,
+) -> bool:
+    value = (metadata or {}).get(key, default)
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return bool(value)
+
+    if isinstance(value, str):
+        cleaned_value = value.strip().lower()
+
+        if cleaned_value in {"true", "1", "yes", "y"}:
+            return True
+        if cleaned_value in {"false", "0", "no", "n"}:
+            return False
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"metadata_json.{key} must be a boolean value",
+    )
+
+def metadata_int_value(
+    metadata: Optional[dict[str, Any]],
+    key: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = (metadata or {}).get(key, default)
+
+    try:
+        parsed_value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"metadata_json.{key} must be an integer value",
+        ) from exc
+
+    if parsed_value < minimum or parsed_value > maximum:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"metadata_json.{key} must be between "
+                f"{minimum} and {maximum}"
+            ),
+        )
+
+    return parsed_value
+
 def execute_benchmark_run(
     db: Session,
     dataset: BenchmarkDataset,
@@ -311,13 +365,17 @@ def execute_benchmark_run(
 ) -> tuple[BenchmarkRun, list[BenchmarkRunItem]]:
     resolved_quality_gate_profile = DEFAULT_QUALITY_GATE_PROFILE
     resolved_retrieval_provider = "dense"
+    resolved_rerank = False
+    resolved_candidate_multiplier = 3
 
     benchmark_metadata = {
         "dataset_name": dataset.name,
         "top_k": top_k,
         "retrieval_provider": resolved_retrieval_provider,
+        "rerank": resolved_rerank,
+        "candidate_multiplier": resolved_candidate_multiplier,
         "quality_gate_profile": resolved_quality_gate_profile,
-        "runner_version": "benchmark-runner-v1"
+        "runner_version": "benchmark-runner-v2"
     }
 
     answer_generator = None
@@ -325,6 +383,18 @@ def execute_benchmark_run(
     if pipeline_config is not None:
         resolved_quality_gate_profile = pipeline_config.quality_gate_profile
         resolved_retrieval_provider = pipeline_config.retrieval_provider
+        resolved_rerank = metadata_bool_value(
+            metadata=pipeline_config.metadata_json,
+            key="rerank",
+            default=False,
+        )
+        resolved_candidate_multiplier = metadata_int_value(
+            metadata=pipeline_config.metadata_json,
+            key="candidate_multiplier",
+            default=3,
+            minimum=1,
+            maximum=10,
+        )
         answer_generator = answer_generator_from_pipeline_config(pipeline_config)
 
         benchmark_metadata = {
@@ -337,6 +407,9 @@ def execute_benchmark_run(
             "embedding_provider": pipeline_config.embedding_provider,
             "embedding_model": pipeline_config.embedding_model,
             "quality_gate_profile": pipeline_config.quality_gate_profile,
+            "rerank": resolved_rerank,
+            "candidate_multiplier": resolved_candidate_multiplier,
+            "reranker_settings_source": "pipeline_config.metadata_json",
         }
 
     benchmark_run = BenchmarkRun(
@@ -361,7 +434,9 @@ def execute_benchmark_run(
                 document_id=test_case.document_id or dataset.document_id,
                 retrieval_provider=resolved_retrieval_provider,
                 answer_generator=answer_generator,
-                quality_gate_profile=resolved_quality_gate_profile
+                quality_gate_profile=resolved_quality_gate_profile,
+                rerank=resolved_rerank,
+                candidate_multiplier=resolved_candidate_multiplier,
             )
 
             metrics = to_metrics_dict(result)
@@ -397,6 +472,11 @@ def execute_benchmark_run(
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
                     "retrieval_provider": result.retrieval_provider,
                     "quality_gate_profile": result.quality_gate_profile,
+                    "rerank": resolved_rerank,
+                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "retrieved_chunk_count": result.retrieved_chunk_count,
+                    "reranker_used": result.reranker_used,
+                    "reranker_name": result.reranker_name,
                 }
             )
 
@@ -425,6 +505,10 @@ def execute_benchmark_run(
                     "retrieval_provider": resolved_retrieval_provider,
                     "error_type": "RAGWorkflowError",
                     "quality_gate_profile": resolved_quality_gate_profile,
+                    "rerank": resolved_rerank,
+                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "reranker_used": False,
+                    "reranker_name": None,
                 }
             )
 

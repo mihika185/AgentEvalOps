@@ -37,8 +37,11 @@ class ObservableRAGAnswerResult:
     retrieval_provider: str
     source_chunks: list[SourceChunk]
     retrieval_top_k: int
+    retrieved_chunk_count: int
     document_id: Optional[str]
     answer_generator: str
+    reranker_used: bool
+    reranker_name: Optional[str]
     total_latency_ms: int
     evaluation_metrics: list[MetricResult]
     quality_gate_profile: str
@@ -54,7 +57,9 @@ def run_rag_answer_workflow(
     document_id: Optional[str] = None,
     retrieval_provider: str = "dense",
     answer_generator: Optional[AnswerGenerator] = None,
-    quality_gate_profile: str = DEFAULT_QUALITY_GATE_PROFILE
+    quality_gate_profile: str = DEFAULT_QUALITY_GATE_PROFILE,
+    rerank: bool = False,
+    candidate_multiplier: int = 3,
 ) -> ObservableRAGAnswerResult:
     cleaned_query = query.strip()
 
@@ -66,6 +71,10 @@ def run_rag_answer_workflow(
         raise RAGWorkflowError(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
         )
+    if candidate_multiplier <= 0:
+        raise RAGWorkflowError("candidate_multiplier must be greater than 0")
+    if candidate_multiplier > 10:
+        raise RAGWorkflowError("candidate_multiplier cannot be greater than 10")
     
     resolved_retrieval_provider = normalize_retrieval_provider(retrieval_provider)
     
@@ -89,6 +98,8 @@ def run_rag_answer_workflow(
                 "top_k": top_k,
                 "retrieval_provider": resolved_retrieval_provider,
                 "quality_gate_profile": resolved_quality_gate_profile,
+                "rerank": rerank,
+                "candidate_multiplier": candidate_multiplier,
                 "workflow_version": "rag-answer-v1"
             }
         )
@@ -106,7 +117,9 @@ def run_rag_answer_workflow(
                 name="validate_document_scope",
                 input_data={
                     "document_id": document_id,
-                    "retrieval_provider": resolved_retrieval_provider
+                    "retrieval_provider": resolved_retrieval_provider,
+                    "rerank": rerank,
+                    "candidate_multiplier": candidate_multiplier
                 },
                 output_data={},
                 status="failed",
@@ -132,7 +145,9 @@ def run_rag_answer_workflow(
             top_k=top_k,
             document_id=document_id,
             method=resolved_retrieval_provider,
-            db = db
+            db=db,
+            rerank=rerank,
+            candidate_multiplier=candidate_multiplier,
         )
 
         retrieval_latency_ms = elapsed_ms(retrieval_start)
@@ -146,7 +161,10 @@ def run_rag_answer_workflow(
             input_data={
                 "query": cleaned_query,
                 "top_k": top_k,
-                "document_id": document_id
+                "document_id": document_id,
+                "retrieval_provider": resolved_retrieval_provider,
+                "rerank": rerank,
+                "candidate_multiplier": candidate_multiplier
             },
             output_data={
                 "retrieved_chunks": [
@@ -158,6 +176,10 @@ def run_rag_answer_workflow(
                     }
                     for chunk in retrieval_result.chunks
                 ],
+                "requested_top_k": top_k,
+                "returned_chunk_count": len(retrieval_result.chunks),
+                "reranker_used": retrieval_result.reranker_used,
+                "reranker_name": retrieval_result.reranker_name,
                 "retrieved_count": len(retrieval_result.chunks),
                 "retrieval_method": retrieval_result.retrieval_method,
                 "collection_name": retrieval_result.collection_name,
@@ -221,6 +243,11 @@ def run_rag_answer_workflow(
                 "source_chunk_count": len(source_chunks),
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
+                "rerank": rerank,
+                "candidate_multiplier": candidate_multiplier,
+                "retrieved_chunk_count": len(source_chunks),
+                "reranker_used": retrieval_result.reranker_used,
+                "reranker_name": retrieval_result.reranker_name,
                 "answer_generation_latency_ms": answer_latency_ms
             }
         )
@@ -356,6 +383,11 @@ def run_rag_answer_workflow(
                 "raw_generated_answer": answer,
                 "response_blocked_by_quality_gate": response_blocked_by_quality_gate,
                 "quality_gate_profile": quality_gate_summary.profile_name,
+                "rerank": rerank,
+                "candidate_multiplier": candidate_multiplier,
+                "retrieved_chunk_count": len(source_chunks),
+                "reranker_used": retrieval_result.reranker_used,
+                "reranker_name": retrieval_result.reranker_name,
             }
         )
 
@@ -381,6 +413,9 @@ def run_rag_answer_workflow(
             failed_quality_gates=failed_quality_gates,
             response_blocked_by_quality_gate=response_blocked_by_quality_gate,
             quality_gate_profile=quality_gate_summary.profile_name,
+            retrieved_chunk_count=len(source_chunks),
+            reranker_used=retrieval_result.reranker_used,
+            reranker_name=retrieval_result.reranker_name,
         )
 
     except (RetrievalError, RunRecorderError, QualityGateError) as exc:
