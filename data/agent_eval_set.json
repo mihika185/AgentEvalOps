@@ -1,0 +1,46 @@
+[
+  {
+    "id": "agent_case_001",
+    "question": "Calculate (142080 - 120000) / 120000 * 100",
+    "expected_tools": ["calculator"],
+    "expected_answer_terms": ["18.4"],
+    "max_allowed_tool_calls": 1,
+    "metadata": {
+      "category": "calculator",
+      "expected_expression": "(142080 - 120000) / 120000 * 100"
+    }
+  },
+  {
+    "id": "agent_case_002",
+    "question": "Check order status for ORD-1001",
+    "expected_tools": ["mock_api"],
+    "expected_answer_terms": ["ORD-1001", "delivered"],
+    "max_allowed_tool_calls": 1,
+    "metadata": {
+      "category": "mock_api",
+      "endpoint": "get_order_status"
+    }
+  },
+  {
+    "id": "agent_case_003",
+    "question": "What is the customer plan for CUST-1001?",
+    "expected_tools": ["mock_api"],
+    "expected_answer_terms": ["CUST-1001", "premium", "12"],
+    "max_allowed_tool_calls": 1,
+    "metadata": {
+      "category": "mock_api",
+      "endpoint": "get_customer_plan"
+    }
+  },
+  {
+    "id": "agent_case_004",
+    "question": "What must customers provide when reporting a damaged product?",
+    "expected_tools": ["document_search"],
+    "expected_answer_terms": ["relevant", "chunk"],
+    "max_allowed_tool_calls": 1,
+    "metadata": {
+      "category": "document_search",
+      "requires_indexed_documents": true
+    }
+  }
+]
