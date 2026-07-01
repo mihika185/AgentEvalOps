@@ -487,10 +487,24 @@ def normalize_terms(terms: list[str]) -> list[str]:
 def extract_terms(text: str) -> set[str]:
     raw_terms = re.findall(r"[a-zA-Z0-9.\-]+", text.lower())
 
-    return {
-        normalize_text(term)
-        for term in raw_terms
-        if normalize_text(term)
-    }
+    terms = set()
+
+    for raw_term in raw_terms:
+        normalized_term = normalize_text(raw_term)
+
+        if not normalized_term:
+            continue
+
+        terms.add(normalized_term)
+
+        if "-" in normalized_term:
+            for part in normalized_term.split("-"):
+                cleaned_part = normalize_text(part)
+
+                if cleaned_part:
+                    terms.add(cleaned_part)
+
+    return terms
+
 def normalize_text(text: str) -> str:
     return text.strip().lower().strip(".,;:!?()[]{}\"'")

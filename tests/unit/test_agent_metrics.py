@@ -3,6 +3,15 @@ from backend.app.evaluation.agent_metrics import (
     calculate_tool_order_accuracy,
     evaluate_agent_output,
 )
+from backend.app.evaluation.agent_metrics import extract_terms
+
+def test_extract_terms_splits_hyphenated_terms():
+    terms = extract_terms("Customer CUST-1001 has a 12-hour support SLA.")
+
+    assert "cust-1001" in terms
+    assert "12-hour" in terms
+    assert "12" in terms
+    assert "hour" in terms
 
 def test_agent_metrics_pass_for_correct_calculator_call():
     summary = evaluate_agent_output(
