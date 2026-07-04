@@ -7,6 +7,10 @@ from backend.app.config import settings
 from backend.app.database.connection import get_db
 from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
+from backend.app.experiments.experiment_service import (
+    ExperimentServiceError,
+    ensure_experiment_exists,
+)
 
 router = APIRouter(
     prefix="/rag",
@@ -25,6 +29,7 @@ class RAGAnswerRequest(BaseModel):
     rerank: bool = False
     candidate_multiplier: int = Field(default=3, ge=1, le=10)
     document_id: Optional[str] = None
+    experiment_id: Optional[str] = None
     retrieval_provider: RetrievalProvider = "dense"
     quality_gate_profile: str = Field(
         default=DEFAULT_QUALITY_GATE_PROFILE,
@@ -69,6 +74,8 @@ def generate_rag_answer(
     db: Annotated[Session, Depends(get_db)],
 ):
     try:
+        experiment_id = ensure_experiment_exists(db, payload.experiment_id)
+
         result = run_rag_answer_workflow(
             db=db,
             query=payload.query,
@@ -78,7 +85,9 @@ def generate_rag_answer(
             quality_gate_profile=payload.quality_gate_profile,
             rerank=payload.rerank,
             candidate_multiplier=payload.candidate_multiplier,
+            experiment_id=experiment_id,
         )
+
         return RAGAnswerResponse(
             run_id=result.run_id,
             query=result.query,
@@ -115,6 +124,13 @@ def generate_rag_answer(
             reranker_name=result.reranker_name,
             response_blocked_by_quality_gate=result.response_blocked_by_quality_gate,
         )
+
+    except ExperimentServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
     except RAGWorkflowError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

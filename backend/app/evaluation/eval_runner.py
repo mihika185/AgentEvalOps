@@ -137,6 +137,7 @@ def run_agent_eval_set(
     rerank: bool = True,
     candidate_multiplier: int = 3,
     max_steps: int = 5,
+    experiment_id: Optional[str] = None,
 ) -> AgentEvalRunSummary:
     cases = load_agent_eval_cases(eval_set_path)
     results: list[AgentEvalCaseResult] = []
@@ -152,6 +153,7 @@ def run_agent_eval_set(
                 rerank=rerank,
                 candidate_multiplier=candidate_multiplier,
                 max_steps=max_steps,
+                experiment_id=experiment_id,
             )
 
             evaluation = evaluate_agent_run(

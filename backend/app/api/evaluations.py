@@ -11,6 +11,10 @@ from backend.app.evaluation.agent_metrics import (
     evaluate_agent_run,
 )
 from backend.app.evaluation.eval_runner import EvalRunnerError, run_agent_eval_set
+from backend.app.experiments.experiment_service import (
+    ExperimentServiceError,
+    ensure_experiment_exists,
+)
 
 
 router = APIRouter(
@@ -26,6 +30,7 @@ class AgentEvalSetRunRequest(BaseModel):
     rerank: bool = True
     candidate_multiplier: int = Field(default=3, ge=1, le=10)
     max_steps: int = Field(default=5, ge=1, le=10)
+    experiment_id: Optional[str] = None
 
 class AgentRunEvaluationRequest(BaseModel):
     expected_tools: list[str] = Field(default_factory=list)
@@ -80,6 +85,7 @@ def run_agent_eval_set_endpoint(
 ):
     try:
         eval_set_path = resolve_eval_set_path(payload.eval_set_name)
+        experiment_id = ensure_experiment_exists(db, payload.experiment_id)
 
         summary = run_agent_eval_set(
             db=db,
@@ -90,6 +96,7 @@ def run_agent_eval_set_endpoint(
             rerank=payload.rerank,
             candidate_multiplier=payload.candidate_multiplier,
             max_steps=payload.max_steps,
+            experiment_id=experiment_id,
         )
 
         return AgentEvalSetRunResponse(
@@ -120,6 +127,12 @@ def run_agent_eval_set_endpoint(
                 for result in summary.results
             ],
         )
+
+    except ExperimentServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     except EvalRunnerError as exc:
         raise HTTPException(

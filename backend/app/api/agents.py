@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from backend.app.agents.agent_runner import AgentRunnerError, run_tool_calling_agent
 from backend.app.config import settings
 from backend.app.database.connection import get_db
+from backend.app.experiments.experiment_service import (
+    ExperimentServiceError,
+    ensure_experiment_exists,
+)
 
 
 router = APIRouter(
@@ -17,6 +21,7 @@ class AgentRunRequest(BaseModel):
     query: str = Field(..., min_length=1)
     document_id: Optional[str] = None
     retrieval_provider: str = "hybrid"
+    experiment_id: Optional[str] = None
     top_k: int = Field(
         default=settings.default_retrieval_top_k,
         ge=1,
@@ -48,6 +53,8 @@ def run_agent(
     db: Annotated[Session, Depends(get_db)],
 ):
     try:
+        experiment_id = ensure_experiment_exists(db, payload.experiment_id)
+
         result = run_tool_calling_agent(
             db=db,
             query=payload.query,
@@ -57,6 +64,7 @@ def run_agent(
             rerank=payload.rerank,
             candidate_multiplier=payload.candidate_multiplier,
             max_steps=payload.max_steps,
+            experiment_id=experiment_id,
         )
 
         return AgentRunResponse(
@@ -77,6 +85,12 @@ def run_agent(
             total_latency_ms=result.total_latency_ms,
             metadata=result.metadata,
         )
+
+    except ExperimentServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     except AgentRunnerError as exc:
         raise HTTPException(

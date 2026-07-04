@@ -42,6 +42,7 @@ def run_tool_calling_agent(
     db: Session,
     query: str,
     document_id: Optional[str] = None,
+    experiment_id: Optional[str] = None,
     retrieval_provider: str = "hybrid",
     top_k: int = 3,
     rerank: bool = True,
@@ -64,6 +65,7 @@ def run_tool_calling_agent(
             db=db,
             workflow_type="tool_calling_agent",
             input_query=cleaned_query,
+            experiment_id=experiment_id,
             metadata={
                 "agent_version": "rule-based-agent-v1",
                 "document_id": document_id,

@@ -60,6 +60,7 @@ def run_rag_answer_workflow(
     quality_gate_profile: str = DEFAULT_QUALITY_GATE_PROFILE,
     rerank: bool = False,
     candidate_multiplier: int = 3,
+    experiment_id: Optional[str] = None,
 ) -> ObservableRAGAnswerResult:
     cleaned_query = query.strip()
 
@@ -93,6 +94,7 @@ def run_rag_answer_workflow(
             db=db,
             workflow_type="rag_answer",
             input_query=cleaned_query,
+            experiment_id=experiment_id,
             metadata={
                 "document_id": document_id,
                 "top_k": top_k,
