@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.connection import get_db
-from backend.app.database.models import (
+from backend.app.database.models import(
     BenchmarkDataset,
     BenchmarkRun,
     BenchmarkRunItem,
@@ -18,6 +18,7 @@ from backend.app.database.models import (
 from backend.app.rag.answer_service import SimpleExtractiveAnswerGenerator
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
 from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
+from backend.app.evaluation.retrieval_metrics import calculate_retrieval_metrics
 
 
 router = APIRouter(
@@ -441,6 +442,17 @@ def execute_benchmark_run(
 
             metrics = to_metrics_dict(result)
 
+            retrieval_metrics = build_retrieval_metrics_for_case(
+                result=result,
+                test_case=test_case,
+                k=top_k,
+            )
+
+            metrics = {
+                **metrics,
+                **retrieval_metrics,
+            }
+
             passed, failure_reason = judge_benchmark_case(
                 expected_behavior=test_case.expected_behavior,
                 expected_keywords=test_case.expected_keywords,
@@ -477,6 +489,8 @@ def execute_benchmark_run(
                     "retrieved_chunk_count": result.retrieved_chunk_count,
                     "reranker_used": result.reranker_used,
                     "reranker_name": result.reranker_name,
+                    "expected_relevant_chunk_ids": expected_relevant_chunk_ids(test_case),
+                    "retrieval_metrics_available": bool(retrieval_metrics),
                 }
             )
 
@@ -1241,10 +1255,40 @@ def finalize_benchmark_run(
     hallucination_scores = []
     overall_scores = []
     latency_values = []
+    recall_scores = []
+    precision_scores = []
+    mrr_scores = []
+    ndcg_scores = []
 
     for item in run_items:
         if item.latency_ms is not None:
             latency_values.append(float(item.latency_ms))
+
+        retrieval_metric_names = [
+            metric_name
+            for metric_name in item.metrics_json
+            if metric_name.startswith("recall_at_")
+            or metric_name.startswith("precision_at_")
+            or metric_name.startswith("ndcg_at_")
+        ]
+
+        for metric_name in retrieval_metric_names:
+            value = metric_value(item.metrics_json, metric_name)
+
+            if value is None:
+                continue
+            
+            if metric_name.startswith("recall_at_"):
+                recall_scores.append(value)
+            elif metric_name.startswith("precision_at_"):
+                precision_scores.append(value)
+            elif metric_name.startswith("ndcg_at_"):
+                ndcg_scores.append(value)
+
+        mrr_value = metric_value(item.metrics_json, "mrr")
+
+        if mrr_value is not None:
+            mrr_scores.append(mrr_value)
 
         if item.expected_behavior != "answerable":
             continue
@@ -1286,7 +1330,12 @@ def finalize_benchmark_run(
         **(benchmark_run.metadata_json or {}),
         "answer_quality_metrics_scope": "answerable_cases_only",
         "latency_metrics_scope": "all_cases",
-        "unanswerable_success_metric": "response_blocked_by_quality_gate"
+        "unanswerable_success_metric": "response_blocked_by_quality_gate",
+        "retrieval_metrics_scope": "cases_with_expected_relevant_chunk_ids",
+        "average_recall_at_k": average(recall_scores),
+        "average_precision_at_k": average(precision_scores),
+        "average_mrr": average(mrr_scores),
+        "average_ndcg_at_k": average(ndcg_scores),
     }
 
     benchmark_run.completed_at = utc_now()
@@ -1376,4 +1425,47 @@ def to_benchmark_run_detail_response(
             to_benchmark_run_item_response(item)
             for item in run_items
         ]
+    )
+
+def expected_relevant_chunk_ids(test_case: BenchmarkTestCase) -> list[str]:
+    metadata = test_case.metadata_json or {}
+
+    raw_ids = (
+        metadata.get("expected_chunk_ids")
+        or metadata.get("relevant_chunk_ids")
+        or metadata.get("expected_relevant_chunk_ids")
+        or []
+    )
+
+    if not isinstance(raw_ids, list):
+        return []
+
+    return [
+        str(chunk_id).strip()
+        for chunk_id in raw_ids
+        if str(chunk_id).strip()
+    ]
+
+def source_chunk_ids_from_result(result) -> list[str]:
+    return [
+        chunk.chunk_id
+        for chunk in result.source_chunks
+    ]
+
+def build_retrieval_metrics_for_case(
+    result,
+    test_case: BenchmarkTestCase,
+    k: int,
+) -> dict[str, float]:
+    relevant_chunk_ids = expected_relevant_chunk_ids(test_case)
+
+    if not relevant_chunk_ids:
+        return {}
+
+    retrieved_chunk_ids = source_chunk_ids_from_result(result)
+
+    return calculate_retrieval_metrics(
+        retrieved_ids=retrieved_chunk_ids,
+        relevant_ids=relevant_chunk_ids,
+        k=k,
     )
