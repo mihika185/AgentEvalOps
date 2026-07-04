@@ -13,6 +13,7 @@ from backend.app.api.benchmarks import router as benchmarks_router
 from backend.app.api.pipeline_configs import router as pipeline_configs_router
 from backend.app.api.agents import router as agents_router
 from backend.app.api.evaluations import router as evaluations_router
+from backend.app.api.experiments import router as experiments_router
 
 configure_logging()
 logger = get_logger(__name__)
@@ -34,6 +35,7 @@ app.include_router(benchmarks_router, prefix=settings.api_prefix)
 app.include_router(pipeline_configs_router, prefix=settings.api_prefix)
 app.include_router(agents_router, prefix=settings.api_prefix)
 app.include_router(evaluations_router, prefix=settings.api_prefix)
+app.include_router(experiments_router, prefix=settings.api_prefix)
 
 logger.info(
     "%s initialized in %s mode",
