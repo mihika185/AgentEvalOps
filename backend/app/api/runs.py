@@ -98,6 +98,22 @@ class QualityGateRunResponse(BaseModel):
     pass_rate: float
     checks: list[QualityGateCheckResponse]
 
+class RunInspectionSummaryResponse(BaseModel):
+    trace_step_count: int
+    evaluation_result_count: int
+    quality_gate_result_count: int
+    failed_trace_step_count: int
+    total_trace_latency_ms: int
+    evaluator_types: list[str]
+
+
+class RunInspectionResponse(BaseModel):
+    run: RunDetailResponse
+    trace_steps: list[TraceStepResponse]
+    evaluation_results: list[EvaluationResultResponse]
+    quality_gate_results: list[EvaluationResultResponse]
+    summary: RunInspectionSummaryResponse
+
 def get_run_or_404(run_id: str, db: Session) -> Run:
     run = db.get(Run, run_id)
 
@@ -109,7 +125,84 @@ def get_run_or_404(run_id: str, db: Session) -> Run:
 
     return run
 
-@router.get("", response_model=list[RunSummaryResponse])
+def build_run_detail_response(run: Run) -> RunDetailResponse:
+    return RunDetailResponse(
+        id=run.id,
+        experiment_id=run.experiment_id,
+        workflow_type=run.workflow_type,
+        input_query=run.input_query,
+        output_answer=run.output_answer,
+        status=run.status,
+        latency_ms=run.latency_ms,
+        prompt_tokens=run.prompt_tokens,
+        completion_tokens=run.completion_tokens,
+        estimated_cost=run.estimated_cost,
+        error_message=run.error_message,
+        metadata_json=run.metadata_json or {},
+        created_at=run.created_at,
+        completed_at=run.completed_at,
+    )
+
+def build_trace_step_response(step: TraceStep) -> TraceStepResponse:
+    return TraceStepResponse(
+        id=step.id,
+        run_id=step.run_id,
+        step_index=step.step_index,
+        step_type=step.step_type,
+        name=step.name,
+        input_data=step.input_data or {},
+        output_data=step.output_data or {},
+        latency_ms=step.latency_ms,
+        status=step.status,
+        error_message=step.error_message,
+        created_at=step.created_at,
+    )
+
+def build_evaluation_result_response(
+    result: EvaluationResult,
+) -> EvaluationResultResponse:
+    return EvaluationResultResponse(
+        id=result.id,
+        run_id=result.run_id,
+        metric_name=result.metric_name,
+        metric_value=result.metric_value,
+        evaluator_type=result.evaluator_type,
+        details_json=result.details_json or {},
+        created_at=result.created_at,
+    )
+
+def build_run_inspection_summary(
+    trace_steps: list[TraceStep],
+    evaluation_results: list[EvaluationResult],
+    quality_gate_results: list[EvaluationResult],
+) -> RunInspectionSummaryResponse:
+    all_results = evaluation_results + quality_gate_results
+
+    return RunInspectionSummaryResponse(
+        trace_step_count=len(trace_steps),
+        evaluation_result_count=len(evaluation_results),
+        quality_gate_result_count=len(quality_gate_results),
+        failed_trace_step_count=sum(
+            1
+            for step in trace_steps
+            if step.status != "completed"
+        ),
+        total_trace_latency_ms=sum(
+            step.latency_ms or 0
+            for step in trace_steps
+        ),
+        evaluator_types=sorted(
+            {
+                result.evaluator_type
+                for result in all_results
+            }
+        ),
+    )
+
+@router.get(
+        "",
+        response_model=list[RunSummaryResponse]
+)
 def list_runs(
     db: Annotated[Session, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -150,31 +243,22 @@ def list_runs(
         for run in runs
     ]
 
-@router.get("/{run_id}", response_model=RunDetailResponse)
+@router.get(
+        "/{run_id}",
+        response_model=RunDetailResponse
+    )
 def get_run(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
 ):
     run = get_run_or_404(run_id, db)
 
-    return RunDetailResponse(
-        id=run.id,
-        experiment_id=run.experiment_id,
-        workflow_type=run.workflow_type,
-        input_query=run.input_query,
-        output_answer=run.output_answer,
-        status=run.status,
-        latency_ms=run.latency_ms,
-        prompt_tokens=run.prompt_tokens,
-        completion_tokens=run.completion_tokens,
-        estimated_cost=run.estimated_cost,
-        error_message=run.error_message,
-        metadata_json=run.metadata_json,
-        created_at=run.created_at,
-        completed_at=run.completed_at
-    )
+    return build_run_detail_response(run)
 
-@router.get("/{run_id}/trace", response_model=list[TraceStepResponse])
+@router.get(
+        "/{run_id}/trace",
+        response_model=list[TraceStepResponse]
+)
 def get_run_trace(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -190,23 +274,73 @@ def get_run_trace(
     trace_steps = db.execute(statement).scalars().all()
 
     return [
-        TraceStepResponse(
-            id=step.id,
-            run_id=step.run_id,
-            step_index=step.step_index,
-            step_type=step.step_type,
-            name=step.name,
-            input_data=step.input_data,
-            output_data=step.output_data,
-            latency_ms=step.latency_ms,
-            status=step.status,
-            error_message=step.error_message,
-            created_at=step.created_at
-        )
+        build_trace_step_response(step)
         for step in trace_steps
     ]
 
-@router.post("/{run_id}/evaluate", response_model=RunEvaluationResponse)
+@router.get(
+        "/{run_id}/inspection",
+        response_model=RunInspectionResponse
+)
+def inspect_run(
+    run_id: str,
+    db: Annotated[Session, Depends(get_db)]
+):
+    run = get_run_or_404(run_id, db)
+
+    trace_statement = (
+        select(TraceStep)
+        .where(TraceStep.run_id == run_id)
+        .order_by(TraceStep.step_index.asc())
+    )
+
+    trace_steps = db.execute(trace_statement).scalars().all()
+
+    evaluation_statement = (
+        select(EvaluationResult)
+        .where(EvaluationResult.run_id == run_id)
+        .order_by(EvaluationResult.evaluator_type.asc(), EvaluationResult.metric_name.asc())
+    )
+
+    all_evaluation_results = db.execute(evaluation_statement).scalars().all()
+
+    quality_gate_results = [
+        result
+        for result in all_evaluation_results
+        if result.evaluator_type == QUALITY_GATE_EVALUATOR_TYPE
+    ]
+
+    evaluation_results = [
+        result
+        for result in all_evaluation_results
+        if result.evaluator_type != QUALITY_GATE_EVALUATOR_TYPE
+    ]
+
+    return RunInspectionResponse(
+        run=build_run_detail_response(run),
+        trace_steps=[
+            build_trace_step_response(step)
+            for step in trace_steps
+        ],
+        evaluation_results=[
+            build_evaluation_result_response(result)
+            for result in evaluation_results
+        ],
+        quality_gate_results=[
+            build_evaluation_result_response(result)
+            for result in quality_gate_results
+        ],
+        summary=build_run_inspection_summary(
+            trace_steps=trace_steps,
+            evaluation_results=evaluation_results,
+            quality_gate_results=quality_gate_results,
+        ),
+    )
+
+@router.post(
+        "/{run_id}/evaluate",
+        response_model=RunEvaluationResponse
+)
 def evaluate_run(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -235,7 +369,10 @@ def evaluate_run(
             detail=str(exc)
         ) from exc
 
-@router.get("/{run_id}/evaluations", response_model=list[EvaluationResultResponse])
+@router.get(
+        "/{run_id}/evaluations", 
+        response_model=list[EvaluationResultResponse]
+)
 def get_run_evaluations(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -251,19 +388,14 @@ def get_run_evaluations(
     evaluation_results = db.execute(statement).scalars().all()
 
     return [
-        EvaluationResultResponse(
-            id=result.id,
-            run_id=result.run_id,
-            metric_name=result.metric_name,
-            metric_value=result.metric_value,
-            evaluator_type=result.evaluator_type,
-            details_json=result.details_json,
-            created_at=result.created_at
-        )
+        build_evaluation_result_response(result)
         for result in evaluation_results
     ]
 
-@router.post("/{run_id}/quality-gates/evaluate", response_model=QualityGateRunResponse)
+@router.post(
+        "/{run_id}/quality-gates/evaluate", 
+        response_model=QualityGateRunResponse
+)
 def evaluate_run_quality_gates(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -304,7 +436,10 @@ def evaluate_run_quality_gates(
             detail=str(exc)
         ) from exc
 
-@router.get("/{run_id}/quality-gates", response_model=list[EvaluationResultResponse])
+@router.get(
+        "/{run_id}/quality-gates",
+        response_model=list[EvaluationResultResponse]
+)
 def get_run_quality_gate_results(
     run_id: str,
     db: Annotated[Session, Depends(get_db)]
@@ -323,14 +458,6 @@ def get_run_quality_gate_results(
     quality_gate_results = db.execute(statement).scalars().all()
 
     return [
-        EvaluationResultResponse(
-            id=result.id,
-            run_id=result.run_id,
-            metric_name=result.metric_name,
-            metric_value=result.metric_value,
-            evaluator_type=result.evaluator_type,
-            details_json=result.details_json,
-            created_at=result.created_at
-        )
+        build_evaluation_result_response(result)
         for result in quality_gate_results
     ]
