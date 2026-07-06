@@ -1,6 +1,7 @@
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,8 +13,10 @@ logger = get_logger(__name__)
 
 EVALUATOR_TYPE = "heuristic-rag-evaluator-v1"
 
+
 class EvaluationError(Exception):
     pass
+
 
 @dataclass(frozen=True)
 class MetricResult:
@@ -21,33 +24,38 @@ class MetricResult:
     metric_value: float
     details: dict[str, Any]
 
+
 @dataclass(frozen=True)
 class RunEvaluationSummary:
     run_id: str
     evaluator_type: str
     metrics: list[MetricResult]
 
+
 def evaluate_rag_run(
     db: Session,
     run_id: str,
-    persist: bool = True
+    persist: bool = True,
 ) -> RunEvaluationSummary:
     run = db.get(Run, run_id)
 
     if run is None:
         raise EvaluationError(f"Run with id '{run_id}' was not found")
+
     if run.workflow_type != "rag_answer":
         raise EvaluationError(
             f"Run '{run_id}' has unsupported workflow_type '{run.workflow_type}'"
         )
+
     if run.status != "completed":
         raise EvaluationError(
             f"Run '{run_id}' must be completed before evaluation"
         )
+
     generated_answer = get_generated_answer_for_evaluation(
         db=db,
         run_id=run_id,
-        run=run
+        run=run,
     )
 
     if not generated_answer:
@@ -56,6 +64,7 @@ def evaluate_rag_run(
     retrieval_step = get_trace_step(db, run_id, "retrieval")
 
     retrieved_chunks_payload = retrieval_step.output_data.get("retrieved_chunks", [])
+
     retrieved_scores = [
         float(item.get("score", 0.0))
         for item in retrieved_chunks_payload
@@ -76,8 +85,13 @@ def evaluate_rag_run(
         answer=generated_answer,
         source_text=source_text,
         source_chunks=source_chunks,
-        retrieved_scores=retrieved_scores
+        retrieved_scores=retrieved_scores,
     )
+
+    citation_step = get_optional_trace_step(db, run_id, "citation_check")
+
+    if citation_step is not None:
+        metrics.extend(build_citation_metrics(citation_step))
 
     if persist:
         save_metrics(db, run_id, metrics)
@@ -85,21 +99,22 @@ def evaluate_rag_run(
     logger.info(
         "Evaluated run %s with %s metrics",
         run_id,
-        len(metrics)
+        len(metrics),
     )
 
     return RunEvaluationSummary(
         run_id=run_id,
         evaluator_type=EVALUATOR_TYPE,
-        metrics=metrics
+        metrics=metrics,
     )
+
 
 def get_trace_step(db: Session, run_id: str, step_type: str) -> TraceStep:
     trace_step = db.execute(
         select(TraceStep)
         .where(
             TraceStep.run_id == run_id,
-            TraceStep.step_type == step_type
+            TraceStep.step_type == step_type,
         )
         .order_by(TraceStep.step_index.asc())
     ).scalars().first()
@@ -111,6 +126,22 @@ def get_trace_step(db: Session, run_id: str, step_type: str) -> TraceStep:
 
     return trace_step
 
+
+def get_optional_trace_step(
+    db: Session,
+    run_id: str,
+    step_type: str,
+) -> Optional[TraceStep]:
+    return db.execute(
+        select(TraceStep)
+        .where(
+            TraceStep.run_id == run_id,
+            TraceStep.step_type == step_type,
+        )
+        .order_by(TraceStep.step_index.asc())
+    ).scalars().first()
+
+
 def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
     if not chunk_ids:
         return []
@@ -120,7 +151,10 @@ def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
         .where(DocumentChunk.id.in_(chunk_ids))
     ).scalars().all()
 
-    chunk_by_id = {chunk.id: chunk for chunk in chunks}
+    chunk_by_id = {
+        chunk.id: chunk
+        for chunk in chunks
+    }
 
     return [
         chunk_by_id[chunk_id]
@@ -128,16 +162,17 @@ def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
         if chunk_id in chunk_by_id
     ]
 
+
 def get_generated_answer_for_evaluation(
     db: Session,
     run_id: str,
-    run: Run
+    run: Run,
 ) -> Optional[str]:
     answer_step = db.execute(
         select(TraceStep)
         .where(
             TraceStep.run_id == run_id,
-            TraceStep.step_type == "answer_generation"
+            TraceStep.step_type == "answer_generation",
         )
         .order_by(TraceStep.step_index.asc())
     ).scalars().first()
@@ -150,12 +185,13 @@ def get_generated_answer_for_evaluation(
 
     return run.output_answer
 
+
 def build_metrics(
     query: str,
     answer: str,
     source_text: str,
     source_chunks: list[DocumentChunk],
-    retrieved_scores: list[float]
+    retrieved_scores: list[float],
 ) -> list[MetricResult]:
     query_terms = extract_keywords(query)
     answer_terms = extract_keywords(answer)
@@ -180,6 +216,7 @@ def build_metrics(
         query_answer_relevance_score = 0.0
 
     top_retrieval_score = max(retrieved_scores) if retrieved_scores else 0.0
+
     average_retrieval_score = (
         sum(retrieved_scores) / len(retrieved_scores)
         if retrieved_scores
@@ -188,7 +225,7 @@ def build_metrics(
 
     source_coverage_score = calculate_source_coverage_score(
         answer_terms=answer_terms,
-        source_chunks=source_chunks
+        source_chunks=source_chunks,
     )
 
     retrieval_confidence = clamp(top_retrieval_score, 0.0, 1.0)
@@ -207,8 +244,8 @@ def build_metrics(
             details={
                 "supported_terms": sorted(supported_terms),
                 "unsupported_terms": sorted(unsupported_terms),
-                "answer_terms": sorted(answer_terms)
-            }
+                "answer_terms": sorted(answer_terms),
+            },
         ),
         MetricResult(
             metric_name="query_answer_relevance_score",
@@ -217,37 +254,37 @@ def build_metrics(
                 "query_terms": sorted(query_terms),
                 "matched_query_terms": sorted(matched_query_terms),
                 "missing_query_terms": sorted(missing_query_terms),
-                "answer_terms": sorted(answer_terms)
-            }
+                "answer_terms": sorted(answer_terms),
+            },
         ),
         MetricResult(
             metric_name="hallucination_risk",
             metric_value=round(hallucination_risk, 4),
             details={
                 "definition": "1 - answer_support_score",
-                "unsupported_terms": sorted(unsupported_terms)
-            }
+                "unsupported_terms": sorted(unsupported_terms),
+            },
         ),
         MetricResult(
             metric_name="top_retrieval_score",
             metric_value=round(top_retrieval_score, 4),
             details={
-                "retrieved_scores": retrieved_scores
-            }
+                "retrieved_scores": retrieved_scores,
+            },
         ),
         MetricResult(
             metric_name="average_retrieval_score",
             metric_value=round(average_retrieval_score, 4),
             details={
-                "retrieved_scores": retrieved_scores
-            }
+                "retrieved_scores": retrieved_scores,
+            },
         ),
         MetricResult(
             metric_name="source_coverage_score",
             metric_value=round(source_coverage_score, 4),
             details={
-                "source_chunk_count": len(source_chunks)
-            }
+                "source_chunk_count": len(source_chunks),
+            },
         ),
         MetricResult(
             metric_name="overall_quality_score",
@@ -257,25 +294,78 @@ def build_metrics(
                     "answer_support_score": 0.40,
                     "query_answer_relevance_score": 0.25,
                     "top_retrieval_score": 0.20,
-                    "source_coverage_score": 0.15
-                }
-            }
+                    "source_coverage_score": 0.15,
+                },
+            },
         ),
         MetricResult(
             metric_name="source_chunk_count",
             metric_value=float(len(source_chunks)),
-            details={}
+            details={},
         ),
         MetricResult(
             metric_name="answer_length_chars",
             metric_value=float(len(answer)),
-            details={}
+            details={},
         ),
     ]
 
+
+def build_citation_metrics(citation_step: TraceStep) -> list[MetricResult]:
+    output_data = citation_step.output_data or {}
+
+    citation_check_passed = bool(output_data.get("citation_check_passed", False))
+    citation_accuracy_score = float(output_data.get("citation_accuracy_score", 0.0))
+    total_citation_count = int(output_data.get("total_citation_count", 0))
+    valid_citation_count = int(output_data.get("valid_citation_count", 0))
+    failed_reasons = output_data.get("failed_reasons", [])
+
+    citation_coverage_score = (
+        valid_citation_count / total_citation_count
+        if total_citation_count
+        else 0.0
+    )
+
+    return [
+        MetricResult(
+            metric_name="citation_accuracy_score",
+            metric_value=round(citation_accuracy_score, 4),
+            details={
+                "definition": "average citation support score adjusted by retrieval validity",
+                "failed_reasons": failed_reasons,
+            },
+        ),
+        MetricResult(
+            metric_name="citation_check_passed",
+            metric_value=1.0 if citation_check_passed else 0.0,
+            details={
+                "failed_reasons": failed_reasons,
+            },
+        ),
+        MetricResult(
+            metric_name="citation_count",
+            metric_value=float(total_citation_count),
+            details={},
+        ),
+        MetricResult(
+            metric_name="valid_citation_count",
+            metric_value=float(valid_citation_count),
+            details={},
+        ),
+        MetricResult(
+            metric_name="citation_coverage_score",
+            metric_value=round(citation_coverage_score, 4),
+            details={
+                "valid_citation_count": valid_citation_count,
+                "total_citation_count": total_citation_count,
+            },
+        ),
+    ]
+
+
 def calculate_source_coverage_score(
     answer_terms: set[str],
-    source_chunks: list[DocumentChunk]
+    source_chunks: list[DocumentChunk],
 ) -> float:
     if not answer_terms or not source_chunks:
         return 0.0
@@ -290,16 +380,17 @@ def calculate_source_coverage_score(
 
     return useful_chunks / len(source_chunks)
 
+
 def save_metrics(
     db: Session,
     run_id: str,
-    metrics: list[MetricResult]
+    metrics: list[MetricResult],
 ) -> None:
     existing_results = db.execute(
         select(EvaluationResult)
         .where(
             EvaluationResult.run_id == run_id,
-            EvaluationResult.evaluator_type == EVALUATOR_TYPE
+            EvaluationResult.evaluator_type == EVALUATOR_TYPE,
         )
     ).scalars().all()
 
@@ -313,19 +404,22 @@ def save_metrics(
                 metric_name=metric.metric_name,
                 metric_value=metric.metric_value,
                 evaluator_type=EVALUATOR_TYPE,
-                details_json=metric.details
+                details_json=metric.details,
             )
         )
 
     db.commit()
 
+
 def extract_keywords(text: str) -> set[str]:
     stop_words = {
-        "a", "an", "the", "is", "are", "was", "were", "do", "does", "did","can", "could", "should", "would", 
-        "i", "you", "we", "they", "he", "she", "it", "this", "that", "these", "those", "to", "for", "of","in", 
-        "on", "at", "by", "with", "and", "or", "but", "from", "as","get", "be", "what", "when", "where", "who", 
-        "whom", "whose", "why", "how", "tell", "me", "about", "please", "policy", "policies", "company", "may",
-        "must", "does"
+        "a", "an", "the", "is", "are", "was", "were", "do", "does", "did",
+        "can", "could", "should", "would", "i", "you", "we", "they", "he",
+        "she", "it", "this", "that", "these", "those", "to", "for", "of",
+        "in", "on", "at", "by", "with", "and", "or", "but", "from", "as",
+        "get", "be", "what", "when", "where", "who", "whom", "whose", "why",
+        "how", "tell", "me", "about", "please", "policy", "policies",
+        "company", "may", "must", "does",
     }
 
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
@@ -437,6 +531,7 @@ def normalize_keyword(token: str) -> str:
         return token[:-1]
 
     return token
+
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))

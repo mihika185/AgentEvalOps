@@ -1,11 +1,19 @@
 import time
 from dataclasses import dataclass
 from typing import Optional
+
 from sqlalchemy.orm import Session
 
 from backend.app.config import settings
-from backend.app.logging_config import get_logger
 from backend.app.database.models import Document
+from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
+from backend.app.evaluation.quality_gates import (
+    DEFAULT_QUALITY_GATE_PROFILE,
+    QualityGateError,
+    evaluate_quality_gates,
+    normalize_quality_gate_profile_name,
+)
+from backend.app.logging_config import get_logger
 from backend.app.observability.run_recorder import (
     RunRecorderError,
     complete_run,
@@ -14,20 +22,22 @@ from backend.app.observability.run_recorder import (
     record_trace_step,
 )
 from backend.app.rag.answer_service import AnswerGenerator, SourceChunk
+from backend.app.rag.citation_checker import (
+    Citation,
+    CitationCheckResult,
+    citation_to_dict,
+    check_answer_citations,
+)
 from backend.app.rag.llm_answer_generator import get_default_answer_generator
 from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_chunks
-from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
-from backend.app.evaluation.quality_gates import (
-    DEFAULT_QUALITY_GATE_PROFILE,
-    QualityGateError,
-    evaluate_quality_gates,
-    normalize_quality_gate_profile_name,
-)
+
 
 logger = get_logger(__name__)
 
+
 class RAGWorkflowError(Exception):
     pass
+
 
 @dataclass(frozen=True)
 class ObservableRAGAnswerResult:
@@ -36,6 +46,10 @@ class ObservableRAGAnswerResult:
     answer: str
     retrieval_provider: str
     source_chunks: list[SourceChunk]
+    citations: list[Citation]
+    citation_check_passed: bool
+    citation_accuracy_score: float
+    citation_failed_reasons: list[str]
     retrieval_top_k: int
     retrieved_chunk_count: int
     document_id: Optional[str]
@@ -49,6 +63,7 @@ class ObservableRAGAnswerResult:
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
+
 
 def run_rag_answer_workflow(
     db: Session,
@@ -66,19 +81,23 @@ def run_rag_answer_workflow(
 
     if not cleaned_query:
         raise RAGWorkflowError("Query cannot be empty")
+
     if top_k <= 0:
         raise RAGWorkflowError("top_k must be greater than 0")
+
     if top_k > settings.max_retrieval_top_k:
         raise RAGWorkflowError(
             f"top_k cannot be greater than {settings.max_retrieval_top_k}"
         )
+
     if candidate_multiplier <= 0:
         raise RAGWorkflowError("candidate_multiplier must be greater than 0")
+
     if candidate_multiplier > 10:
         raise RAGWorkflowError("candidate_multiplier cannot be greater than 10")
-    
+
     resolved_retrieval_provider = normalize_retrieval_provider(retrieval_provider)
-    
+
     try:
         resolved_quality_gate_profile = normalize_quality_gate_profile_name(
             quality_gate_profile
@@ -102,8 +121,8 @@ def run_rag_answer_workflow(
                 "quality_gate_profile": resolved_quality_gate_profile,
                 "rerank": rerank,
                 "candidate_multiplier": candidate_multiplier,
-                "workflow_version": "rag-answer-v1"
-            }
+                "workflow_version": "rag-answer-v2-citations",
+            },
         )
 
         run_id = run.run_id
@@ -121,11 +140,11 @@ def run_rag_answer_workflow(
                     "document_id": document_id,
                     "retrieval_provider": resolved_retrieval_provider,
                     "rerank": rerank,
-                    "candidate_multiplier": candidate_multiplier
+                    "candidate_multiplier": candidate_multiplier,
                 },
                 output_data={},
                 status="failed",
-                error_message=error_message
+                error_message=error_message,
             )
 
             fail_run(
@@ -134,8 +153,8 @@ def run_rag_answer_workflow(
                 error_message=error_message,
                 latency_ms=elapsed_ms(total_start),
                 metadata={
-                    "failure_stage": "document_validation"
-                }
+                    "failure_stage": "document_validation",
+                },
             )
 
             raise RAGWorkflowError(error_message)
@@ -166,7 +185,7 @@ def run_rag_answer_workflow(
                 "document_id": document_id,
                 "retrieval_provider": resolved_retrieval_provider,
                 "rerank": rerank,
-                "candidate_multiplier": candidate_multiplier
+                "candidate_multiplier": candidate_multiplier,
             },
             output_data={
                 "retrieved_chunks": [
@@ -174,7 +193,7 @@ def run_rag_answer_workflow(
                         "chunk_id": chunk.chunk_id,
                         "document_id": chunk.document_id,
                         "score": chunk.score,
-                        "metadata": chunk.metadata
+                        "metadata": chunk.metadata,
                     }
                     for chunk in retrieval_result.chunks
                 ],
@@ -186,9 +205,9 @@ def run_rag_answer_workflow(
                 "retrieval_method": retrieval_result.retrieval_method,
                 "collection_name": retrieval_result.collection_name,
                 "embedding_provider": retrieval_result.embedding_provider,
-                "embedding_model": retrieval_result.embedding_model
+                "embedding_model": retrieval_result.embedding_model,
             },
-            latency_ms=retrieval_latency_ms
+            latency_ms=retrieval_latency_ms,
         )
 
         generator = answer_generator or get_default_answer_generator()
@@ -197,7 +216,7 @@ def run_rag_answer_workflow(
 
         answer = generator.generate_answer(
             query=cleaned_query,
-            chunks=retrieval_result.chunks
+            chunks=retrieval_result.chunks,
         )
 
         answer_latency_ms = elapsed_ms(answer_start)
@@ -208,7 +227,7 @@ def run_rag_answer_workflow(
                 document_id=chunk.document_id,
                 score=chunk.score,
                 text=chunk.text,
-                metadata=chunk.metadata
+                metadata=chunk.metadata,
             )
             for chunk in retrieval_result.chunks
         ]
@@ -222,13 +241,29 @@ def run_rag_answer_workflow(
             input_data={
                 "query": cleaned_query,
                 "source_chunk_ids": [chunk.chunk_id for chunk in source_chunks],
-                "source_chunk_count": len(source_chunks)
+                "source_chunk_count": len(source_chunks),
             },
             output_data={
                 "answer": answer,
-                "answer_length": len(answer)
+                "answer_length": len(answer),
             },
-            latency_ms=answer_latency_ms
+            latency_ms=answer_latency_ms,
+        )
+
+        citation_start = time.perf_counter()
+
+        citation_check = check_answer_citations(
+            answer=answer,
+            source_chunks=source_chunks,
+        )
+
+        citation_latency_ms = elapsed_ms(citation_start)
+
+        record_citation_trace_step(
+            db=db,
+            run_id=run_id,
+            citation_check=citation_check,
+            latency_ms=citation_latency_ms,
         )
 
         total_latency_ms = elapsed_ms(total_start)
@@ -245,13 +280,18 @@ def run_rag_answer_workflow(
                 "source_chunk_count": len(source_chunks),
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
+                "answer_generation_latency_ms": answer_latency_ms,
+                "citation_check_latency_ms": citation_latency_ms,
+                "citation_check_passed": citation_check.citation_check_passed,
+                "citation_accuracy_score": citation_check.citation_accuracy_score,
+                "citation_count": citation_check.total_citation_count,
+                "cited_chunk_ids": citation_check.cited_chunk_ids,
                 "rerank": rerank,
                 "candidate_multiplier": candidate_multiplier,
                 "retrieved_chunk_count": len(source_chunks),
                 "reranker_used": retrieval_result.reranker_used,
                 "reranker_name": retrieval_result.reranker_name,
-                "answer_generation_latency_ms": answer_latency_ms
-            }
+            },
         )
 
         evaluation_start = time.perf_counter()
@@ -259,7 +299,7 @@ def run_rag_answer_workflow(
         evaluation_summary = evaluate_rag_run(
             db=db,
             run_id=run_id,
-            persist=True
+            persist=True,
         )
 
         evaluation_latency_ms = elapsed_ms(evaluation_start)
@@ -267,24 +307,24 @@ def run_rag_answer_workflow(
         record_trace_step(
             db=db,
             run_id=run_id,
-            step_index=2,
+            step_index=3,
             step_type="evaluation",
             name=evaluation_summary.evaluator_type,
             input_data={
-                "run_id": run_id
+                "run_id": run_id,
             },
             output_data={
                 "metrics": [
                     {
                         "metric_name": metric.metric_name,
                         "metric_value": metric.metric_value,
-                        "details": metric.details
+                        "details": metric.details,
                     }
                     for metric in evaluation_summary.metrics
                 ],
-                "metric_count": len(evaluation_summary.metrics)
+                "metric_count": len(evaluation_summary.metrics),
             },
-            latency_ms=evaluation_latency_ms
+            latency_ms=evaluation_latency_ms,
         )
 
         quality_gate_start = time.perf_counter()
@@ -293,7 +333,7 @@ def run_rag_answer_workflow(
             db=db,
             run_id=run_id,
             persist=True,
-            profile_name=resolved_quality_gate_profile
+            profile_name=resolved_quality_gate_profile,
         )
 
         quality_gate_latency_ms = elapsed_ms(quality_gate_start)
@@ -307,13 +347,13 @@ def run_rag_answer_workflow(
         record_trace_step(
             db=db,
             run_id=run_id,
-            step_index=3,
+            step_index=4,
             step_type="quality_gate_evaluation",
             name=f"evaluate_quality_gates:{quality_gate_summary.profile_name}",
             input_data={
                 "quality_gate_profile": quality_gate_summary.profile_name,
                 "quality_gate_passed": quality_gate_summary.overall_passed,
-                "failed_quality_gates": failed_quality_gates
+                "failed_quality_gates": failed_quality_gates,
             },
             output_data={
                 "overall_passed": quality_gate_summary.overall_passed,
@@ -329,37 +369,56 @@ def run_rag_answer_workflow(
                         "metric_value": check.metric_value,
                         "operator": check.operator,
                         "threshold": check.threshold,
-                        "passed": check.passed
+                        "passed": check.passed,
                     }
                     for check in quality_gate_summary.checks
-                ]
+                ],
             },
-            latency_ms=quality_gate_latency_ms
+            latency_ms=quality_gate_latency_ms,
         )
 
         response_blocked_by_quality_gate = not quality_gate_summary.overall_passed
 
         final_answer = answer
+        final_citations = citation_check.citations
+        final_citation_check_passed = citation_check.citation_check_passed
+        final_citation_accuracy_score = citation_check.citation_accuracy_score
+        final_citation_failed_reasons = citation_check.failed_reasons
 
         if response_blocked_by_quality_gate:
             final_answer = build_quality_gate_fallback_answer()
+            final_citations = []
+            final_citation_check_passed = False
+            final_citation_accuracy_score = 0.0
+            final_citation_failed_reasons = [
+                *citation_check.failed_reasons,
+                "response_blocked_by_quality_gate",
+            ]
 
         record_trace_step(
             db=db,
             run_id=run_id,
-            step_index=4,
+            step_index=5,
             step_type="response_finalization",
             name="apply_quality_gate_response_policy",
             input_data={
                 "quality_gate_passed": quality_gate_summary.overall_passed,
-                "failed_quality_gates": failed_quality_gates
+                "failed_quality_gates": failed_quality_gates,
+                "raw_citation_check_passed": citation_check.citation_check_passed,
+                "raw_citation_accuracy_score": citation_check.citation_accuracy_score,
             },
             output_data={
                 "raw_generated_answer": answer,
                 "final_answer": final_answer,
-                "response_blocked_by_quality_gate": response_blocked_by_quality_gate
+                "response_blocked_by_quality_gate": response_blocked_by_quality_gate,
+                "final_citations": [
+                    citation_to_dict(citation)
+                    for citation in final_citations
+                ],
+                "final_citation_check_passed": final_citation_check_passed,
+                "final_citation_accuracy_score": final_citation_accuracy_score,
             },
-            latency_ms=0
+            latency_ms=0,
         )
 
         total_latency_ms = elapsed_ms(total_start)
@@ -377,8 +436,19 @@ def run_rag_answer_workflow(
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "answer_generation_latency_ms": answer_latency_ms,
+                "citation_check_latency_ms": citation_latency_ms,
                 "evaluation_latency_ms": evaluation_latency_ms,
                 "quality_gate_latency_ms": quality_gate_latency_ms,
+                "raw_citation_check_passed": citation_check.citation_check_passed,
+                "raw_citation_accuracy_score": citation_check.citation_accuracy_score,
+                "citation_check_passed": final_citation_check_passed,
+                "citation_accuracy_score": final_citation_accuracy_score,
+                "citation_count": len(final_citations),
+                "cited_chunk_ids": [
+                    citation.chunk_id
+                    for citation in final_citations
+                ],
+                "citation_failed_reasons": final_citation_failed_reasons,
                 "quality_gate_passed": quality_gate_summary.overall_passed,
                 "quality_gate_pass_rate": quality_gate_summary.pass_rate,
                 "failed_quality_gates": failed_quality_gates,
@@ -390,13 +460,13 @@ def run_rag_answer_workflow(
                 "retrieved_chunk_count": len(source_chunks),
                 "reranker_used": retrieval_result.reranker_used,
                 "reranker_name": retrieval_result.reranker_name,
-            }
+            },
         )
 
         logger.info(
             "Completed observable RAG workflow %s in %sms",
             run_id,
-            total_latency_ms
+            total_latency_ms,
         )
 
         return ObservableRAGAnswerResult(
@@ -405,6 +475,10 @@ def run_rag_answer_workflow(
             answer=final_answer,
             retrieval_provider=retrieval_result.retrieval_method,
             source_chunks=source_chunks,
+            citations=final_citations,
+            citation_check_passed=final_citation_check_passed,
+            citation_accuracy_score=final_citation_accuracy_score,
+            citation_failed_reasons=final_citation_failed_reasons,
             retrieval_top_k=top_k,
             document_id=document_id,
             answer_generator=generator.generator_name,
@@ -425,11 +499,11 @@ def run_rag_answer_workflow(
             db=db,
             run_id=run_id,
             error_message=str(exc),
-            latency_ms=elapsed_ms(total_start)
+            latency_ms=elapsed_ms(total_start),
         )
 
         raise RAGWorkflowError(str(exc)) from exc
-    
+
     except RAGWorkflowError:
         raise
 
@@ -440,29 +514,68 @@ def run_rag_answer_workflow(
             db=db,
             run_id=run_id,
             error_message="Failed to run RAG answer workflow",
-            latency_ms=elapsed_ms(total_start)
+            latency_ms=elapsed_ms(total_start),
         )
 
         raise RAGWorkflowError("Failed to run RAG answer workflow") from exc
-    
+
+
+def record_citation_trace_step(
+    db: Session,
+    run_id: str,
+    citation_check: CitationCheckResult,
+    latency_ms: int,
+) -> None:
+    record_trace_step(
+        db=db,
+        run_id=run_id,
+        step_index=2,
+        step_type="citation_check",
+        name="validate_structured_citations",
+        input_data={
+            "max_citations": 3,
+            "minimum_support_score": 0.20,
+        },
+        output_data={
+            "citations": [
+                citation_to_dict(citation)
+                for citation in citation_check.citations
+            ],
+            "citation_check_passed": citation_check.citation_check_passed,
+            "citation_accuracy_score": citation_check.citation_accuracy_score,
+            "failed_reasons": citation_check.failed_reasons,
+            "cited_chunk_ids": citation_check.cited_chunk_ids,
+            "valid_citation_count": citation_check.valid_citation_count,
+            "total_citation_count": citation_check.total_citation_count,
+        },
+        latency_ms=latency_ms,
+    )
+
+
 def normalize_retrieval_provider(provider: str) -> str:
     cleaned_provider = provider.strip().lower()
+
     if cleaned_provider in {"dense", "qdrant_vector_search", "vector"}:
         return "dense"
+
     if cleaned_provider in {"bm25", "keyword"}:
         return "bm25"
+
     if cleaned_provider in {"hybrid", "hybrid_retrieval"}:
         return "hybrid"
+
     raise RAGWorkflowError(f"Unsupported retrieval provider: {provider}")
+
 
 def elapsed_ms(start_time: float) -> int:
     return int((time.perf_counter() - start_time) * 1000)
+
 
 def mark_run_failed_safely(
     db: Session,
     run_id: Optional[str],
     error_message: str,
-    latency_ms: int
+    latency_ms: int,
 ) -> None:
     if run_id is None:
         return
@@ -472,10 +585,11 @@ def mark_run_failed_safely(
             db=db,
             run_id=run_id,
             error_message=error_message,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
         )
     except Exception:
         logger.exception("Failed to mark run as failed: %s", run_id)
+
 
 def build_quality_gate_fallback_answer() -> str:
     return (

@@ -37,7 +37,7 @@ IMPORTANT_EXPERIMENT_METRICS = {
     "answer_correctness",
 }
 
-def parse_args() -> argparse.Namespace:
+def parse_args()-> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate a markdown benchmark report for AgentEvalOps."
     )
@@ -96,7 +96,7 @@ def generate_benchmark_report(
     dataset_id: Optional[str] = None,
     experiment_id: Optional[str] = None,
     limit: int = 10,
-) -> str:
+)->str:
     benchmark_runs = load_benchmark_runs(
         db=db,
         dataset_id=dataset_id,
@@ -161,7 +161,7 @@ def load_benchmark_runs(
     db: Session,
     dataset_id: Optional[str],
     limit: int,
-) -> list[BenchmarkRun]:
+)->list[BenchmarkRun]:
     statement = select(BenchmarkRun)
 
     if dataset_id:
@@ -178,7 +178,7 @@ def load_benchmark_runs(
 def load_benchmark_items(
     db: Session,
     benchmark_run_id: str,
-) -> list[BenchmarkRunItem]:
+)->list[BenchmarkRunItem]:
     statement = (
         select(BenchmarkRunItem)
         .where(BenchmarkRunItem.benchmark_run_id == benchmark_run_id)
@@ -190,7 +190,7 @@ def load_benchmark_items(
 def load_datasets_for_benchmark_runs(
     db: Session,
     benchmark_runs: list[BenchmarkRun],
-) -> dict[str, BenchmarkDataset]:
+)->dict[str, BenchmarkDataset]:
     dataset_ids = sorted(
         {
             run.dataset_id
@@ -214,7 +214,7 @@ def load_datasets_for_benchmark_runs(
 def load_experiment_runs(
     db: Session,
     experiment_id: str,
-) -> list[Run]:
+) ->list[Run]:
     statement = (
         select(Run)
         .where(Run.experiment_id == experiment_id)
@@ -226,7 +226,7 @@ def load_experiment_runs(
 def load_evaluation_results_for_runs(
     db: Session,
     run_ids: list[str],
-) -> list[EvaluationResult]:
+) ->list[EvaluationResult]:
     if not run_ids:
         return []
 
@@ -238,7 +238,7 @@ def build_experiment_report_section(
     experiment: Experiment,
     runs: list[Run],
     evaluation_results: list[EvaluationResult],
-) -> list[str]:
+)-> list[str]:
     workflow_counts = count_by_attribute(runs, "workflow_type")
     status_counts = count_by_attribute(runs, "status")
     metric_summaries = summarize_metric_values(evaluation_results)
@@ -312,7 +312,7 @@ def build_experiment_report_section(
 
 def build_benchmark_summary_section(
     benchmark_runs: list[BenchmarkRun],
-) -> list[str]:
+)->list[str]:
     lines = [
         "## Benchmark Run Summary",
         "",
@@ -345,7 +345,7 @@ def build_benchmark_summary_section(
 def build_best_benchmark_run_section(
     best_run: Optional[BenchmarkRun],
     datasets: dict[str, BenchmarkDataset],
-) -> list[str]:
+)->list[str]:
     lines = [
         "## Best Benchmark Run",
         "",
@@ -387,7 +387,7 @@ def build_benchmark_run_details_section(
     db: Session,
     benchmark_runs: list[BenchmarkRun],
     datasets: dict[str, BenchmarkDataset],
-) -> list[str]:
+) ->list[str]:
     lines = [
         "## Benchmark Run Details",
         "",

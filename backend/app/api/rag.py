@@ -1,4 +1,5 @@
 from typing import Annotated, Any, Literal, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -6,11 +7,12 @@ from sqlalchemy.orm import Session
 from backend.app.config import settings
 from backend.app.database.connection import get_db
 from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
-from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
 from backend.app.experiments.experiment_service import (
     ExperimentServiceError,
     ensure_experiment_exists,
 )
+from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
+
 
 router = APIRouter(
     prefix="/rag",
@@ -18,6 +20,7 @@ router = APIRouter(
 )
 
 RetrievalProvider = Literal["dense", "bm25", "hybrid"]
+
 
 class RAGAnswerRequest(BaseModel):
     query: str = Field(..., min_length=1)
@@ -36,6 +39,7 @@ class RAGAnswerRequest(BaseModel):
         min_length=1,
     )
 
+
 class SourceChunkResponse(BaseModel):
     chunk_id: str
     document_id: str
@@ -43,10 +47,23 @@ class SourceChunkResponse(BaseModel):
     text: str
     metadata: dict[str, Any]
 
+
+class CitationResponse(BaseModel):
+    source_number: int
+    chunk_id: str
+    document_id: str
+    retrieval_score: float
+    support_score: float
+    matched_terms: list[str]
+    text_excerpt: str
+    metadata: dict[str, Any]
+
+
 class EvaluationMetricResponse(BaseModel):
     metric_name: str
     metric_value: float
     details: dict[str, Any]
+
 
 class RAGAnswerResponse(BaseModel):
     run_id: str
@@ -54,6 +71,10 @@ class RAGAnswerResponse(BaseModel):
     answer: str
     retrieval_provider: str
     source_chunks: list[SourceChunkResponse]
+    citations: list[CitationResponse]
+    citation_check_passed: bool
+    citation_accuracy_score: float
+    citation_failed_reasons: list[str]
     retrieval_top_k: int
     retrieved_chunk_count: int
     document_id: Optional[str]
@@ -67,6 +88,7 @@ class RAGAnswerResponse(BaseModel):
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
+
 
 @router.post("/answer", response_model=RAGAnswerResponse)
 def generate_rag_answer(
@@ -103,6 +125,22 @@ def generate_rag_answer(
                 )
                 for source in result.source_chunks
             ],
+            citations=[
+                CitationResponse(
+                    source_number=citation.source_number,
+                    chunk_id=citation.chunk_id,
+                    document_id=citation.document_id,
+                    retrieval_score=citation.retrieval_score,
+                    support_score=citation.support_score,
+                    matched_terms=citation.matched_terms,
+                    text_excerpt=citation.text_excerpt,
+                    metadata=citation.metadata,
+                )
+                for citation in result.citations
+            ],
+            citation_check_passed=result.citation_check_passed,
+            citation_accuracy_score=result.citation_accuracy_score,
+            citation_failed_reasons=result.citation_failed_reasons,
             retrieval_top_k=result.retrieval_top_k,
             document_id=result.document_id,
             answer_generator=result.answer_generator,
