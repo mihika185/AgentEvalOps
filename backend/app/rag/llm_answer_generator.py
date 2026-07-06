@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from backend.app.config import settings
 from backend.app.rag.answer_service import (
@@ -17,14 +17,16 @@ SAFE_FALLBACK_ANSWER = (
 class LLMAnswerGenerationError(Exception):
     pass
 
+
 class GroqGroundedAnswerGenerator:
     def __init__(
         self,
         model_name: str = "llama-3.3-70b-versatile",
-        api_key: Optional[str] = None
+        api_key: Optional[str] = None,
     ):
         self.model_name = model_name
         self.generator_name = f"groq:{model_name}"
+        self.last_usage: Optional[dict[str, int]] = None
 
         try:
             from groq import Groq
@@ -45,6 +47,8 @@ class GroqGroundedAnswerGenerator:
         self.client = Groq(api_key=resolved_api_key)
 
     def generate_answer(self, query: str, chunks: list[RetrievedChunk]) -> str:
+        self.last_usage = None
+
         if not chunks:
             return SAFE_FALLBACK_ANSWER
 
@@ -53,15 +57,15 @@ class GroqGroundedAnswerGenerator:
         messages = [
             {
                 "role": "system",
-                "content": build_system_prompt()
+                "content": build_system_prompt(),
             },
             {
                 "role": "user",
                 "content": build_user_prompt(
                     query=query,
-                    context=context
-                )
-            }
+                    context=context,
+                ),
+            },
         ]
 
         try:
@@ -69,12 +73,14 @@ class GroqGroundedAnswerGenerator:
                 model=self.model_name,
                 messages=messages,
                 temperature=0,
-                max_completion_tokens=220
+                max_completion_tokens=220,
             )
         except Exception as exc:
             raise LLMAnswerGenerationError(
                 f"Groq answer generation failed: {exc}"
             ) from exc
+
+        self.last_usage = extract_completion_usage(completion)
 
         answer = completion.choices[0].message.content
 
@@ -92,12 +98,50 @@ def get_default_answer_generator() -> AnswerGenerator:
 
     if provider == "groq":
         return GroqGroundedAnswerGenerator(
-            model_name=settings.default_llm_model
+            model_name=settings.default_llm_model,
         )
 
     raise LLMAnswerGenerationError(
         f"Unsupported LLM provider: {settings.default_llm_provider}"
     )
+
+
+def extract_completion_usage(completion: Any) -> Optional[dict[str, int]]:
+    usage = getattr(completion, "usage", None)
+
+    if usage is None:
+        return None
+
+    prompt_tokens = read_usage_value(usage, "prompt_tokens")
+    completion_tokens = read_usage_value(usage, "completion_tokens")
+    total_tokens = read_usage_value(usage, "total_tokens")
+
+    if prompt_tokens is None or completion_tokens is None:
+        return None
+
+    if total_tokens is None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def read_usage_value(usage: Any, key: str) -> Optional[int]:
+    if isinstance(usage, dict):
+        value = usage.get(key)
+    else:
+        value = getattr(usage, key, None)
+
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def build_system_prompt() -> str:
@@ -113,7 +157,7 @@ def build_system_prompt() -> str:
 
 
 def build_user_prompt(query: str, context: str) -> str:
-    return(
+    return (
         "Question:\n"
         f"{query}\n\n"
         "Retrieved context:\n"
@@ -125,6 +169,7 @@ def build_user_prompt(query: str, context: str) -> str:
         "- Do not include source IDs in the answer; sources are handled separately.\n"
         "- If the answer is not clearly supported, use the exact fallback sentence."
     )
+
 
 def build_context(chunks: list[RetrievedChunk]) -> str:
     context_blocks: list[str] = []
@@ -140,11 +185,12 @@ def build_context(chunks: list[RetrievedChunk]) -> str:
                 chunk_id=chunk.chunk_id,
                 document_id=chunk.document_id,
                 score=chunk.score,
-                text=chunk.text.strip()
+                text=chunk.text.strip(),
             )
         )
 
     return "\n\n".join(context_blocks)
+
 
 def clean_answer(answer: str) -> str:
     cleaned = " ".join(answer.strip().split())

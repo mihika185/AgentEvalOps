@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.app.config import settings
 from backend.app.database.models import Document
 from backend.app.evaluation.answer_evaluator import MetricResult, evaluate_rag_run
+from backend.app.evaluation.cost_latency_tracker import track_answer_generation_usage
 from backend.app.evaluation.quality_gates import (
     DEFAULT_QUALITY_GATE_PROFILE,
     QualityGateError,
@@ -57,6 +58,10 @@ class ObservableRAGAnswerResult:
     reranker_used: bool
     reranker_name: Optional[str]
     total_latency_ms: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost: float
     evaluation_metrics: list[MetricResult]
     quality_gate_profile: str
     quality_gate_passed: bool
@@ -232,6 +237,15 @@ def run_rag_answer_workflow(
             for chunk in retrieval_result.chunks
         ]
 
+        generation_usage = track_answer_generation_usage(
+            generator=generator,
+            generator_name=generator.generator_name,
+            query=cleaned_query,
+            source_chunks=source_chunks,
+            answer=answer,
+            latency_ms=answer_latency_ms,
+        )
+
         record_trace_step(
             db=db,
             run_id=run_id,
@@ -246,6 +260,7 @@ def run_rag_answer_workflow(
             output_data={
                 "answer": answer,
                 "answer_length": len(answer),
+                "token_usage": generation_usage.to_metadata(),
             },
             latency_ms=answer_latency_ms,
         )
@@ -273,6 +288,9 @@ def run_rag_answer_workflow(
             run_id=run_id,
             output_answer=answer,
             latency_ms=total_latency_ms,
+            prompt_tokens=generation_usage.prompt_tokens,
+            completion_tokens=generation_usage.completion_tokens,
+            estimated_cost=generation_usage.estimated_cost,
             metadata={
                 "document_id": document_id,
                 "retrieval_top_k": top_k,
@@ -281,6 +299,12 @@ def run_rag_answer_workflow(
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "answer_generation_latency_ms": answer_latency_ms,
+                "prompt_tokens": generation_usage.prompt_tokens,
+                "completion_tokens": generation_usage.completion_tokens,
+                "total_tokens": generation_usage.total_tokens,
+                "estimated_cost": generation_usage.estimated_cost,
+                "token_usage_source": generation_usage.token_usage_source,
+                "token_usage": generation_usage.to_metadata(),
                 "citation_check_latency_ms": citation_latency_ms,
                 "citation_check_passed": citation_check.citation_check_passed,
                 "citation_accuracy_score": citation_check.citation_accuracy_score,
@@ -428,6 +452,9 @@ def run_rag_answer_workflow(
             run_id=run_id,
             output_answer=final_answer,
             latency_ms=total_latency_ms,
+            prompt_tokens=generation_usage.prompt_tokens,
+            completion_tokens=generation_usage.completion_tokens,
+            estimated_cost=generation_usage.estimated_cost,
             metadata={
                 "document_id": document_id,
                 "retrieval_top_k": top_k,
@@ -436,6 +463,12 @@ def run_rag_answer_workflow(
                 "answer_generator": generator.generator_name,
                 "retrieval_latency_ms": retrieval_latency_ms,
                 "answer_generation_latency_ms": answer_latency_ms,
+                "prompt_tokens": generation_usage.prompt_tokens,
+                "completion_tokens": generation_usage.completion_tokens,
+                "total_tokens": generation_usage.total_tokens,
+                "estimated_cost": generation_usage.estimated_cost,
+                "token_usage_source": generation_usage.token_usage_source,
+                "token_usage": generation_usage.to_metadata(),
                 "citation_check_latency_ms": citation_latency_ms,
                 "evaluation_latency_ms": evaluation_latency_ms,
                 "quality_gate_latency_ms": quality_gate_latency_ms,
@@ -483,6 +516,10 @@ def run_rag_answer_workflow(
             document_id=document_id,
             answer_generator=generator.generator_name,
             total_latency_ms=total_latency_ms,
+            prompt_tokens=generation_usage.prompt_tokens,
+            completion_tokens=generation_usage.completion_tokens,
+            total_tokens=generation_usage.total_tokens,
+            estimated_cost=generation_usage.estimated_cost,
             evaluation_metrics=evaluation_summary.metrics,
             quality_gate_passed=quality_gate_summary.overall_passed,
             quality_gate_pass_rate=quality_gate_summary.pass_rate,

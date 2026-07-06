@@ -82,6 +82,10 @@ class RAGAnswerResponse(BaseModel):
     reranker_used: bool
     reranker_name: Optional[str]
     total_latency_ms: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost: float
     evaluation_metrics: list[EvaluationMetricResponse]
     quality_gate_profile: str
     quality_gate_passed: bool
@@ -145,6 +149,10 @@ def generate_rag_answer(
             document_id=result.document_id,
             answer_generator=result.answer_generator,
             total_latency_ms=result.total_latency_ms,
+            prompt_tokens=result.prompt_tokens,
+            completion_tokens=result.completion_tokens,
+            total_tokens=result.total_tokens,
+            estimated_cost=result.estimated_cost,
             evaluation_metrics=[
                 EvaluationMetricResponse(
                     metric_name=metric.metric_name,

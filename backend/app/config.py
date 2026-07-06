@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal, Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,7 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        extra="ignore"
+        extra="ignore",
     )
 
     app_name: str = "AgentEvalOps API"
@@ -29,8 +30,11 @@ class Settings(BaseSettings):
 
     default_llm_provider: str = "mock"
     default_llm_model: str = "mock-llm"
-    
-    default_embedding_provider: Literal["hash", "sentence-transformers"] = "sentence-transformers"
+
+    default_embedding_provider: Literal[
+        "hash",
+        "sentence-transformers",
+    ] = "sentence-transformers"
     default_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     openai_api_key: Optional[str] = None
@@ -41,6 +45,17 @@ class Settings(BaseSettings):
     max_retrieval_top_k: int = 20
 
     enable_trace_logging: bool = True
+
+    default_input_cost_per_1k_tokens: float = 0.0
+    default_output_cost_per_1k_tokens: float = 0.0
+
+    groq_input_cost_per_1k_tokens: float = 0.0
+    groq_output_cost_per_1k_tokens: float = 0.0
+
+    openai_input_cost_per_1k_tokens: float = 0.0
+    openai_output_cost_per_1k_tokens: float = 0.0
+
+    token_estimation_chars_per_token: int = 4
 
     @property
     def is_development(self) -> bool:

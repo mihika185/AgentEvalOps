@@ -1,22 +1,23 @@
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.database.models import DocumentChunk, EvaluationResult, Run, TraceStep
+from backend.app.evaluation.faithfulness_evaluator import evaluate_faithfulness
+from backend.app.evaluation.hallucination_detector import detect_hallucination
 from backend.app.logging_config import get_logger
 
 
 logger = get_logger(__name__)
 
-EVALUATOR_TYPE = "heuristic-rag-evaluator-v1"
-
+EVALUATOR_TYPE = "heuristic-rag-evaluator-v2"
 
 class EvaluationError(Exception):
     pass
-
 
 @dataclass(frozen=True)
 class MetricResult:
@@ -24,13 +25,11 @@ class MetricResult:
     metric_value: float
     details: dict[str, Any]
 
-
 @dataclass(frozen=True)
 class RunEvaluationSummary:
     run_id: str
     evaluator_type: str
     metrics: list[MetricResult]
-
 
 def evaluate_rag_run(
     db: Session,
@@ -62,6 +61,7 @@ def evaluate_rag_run(
         raise EvaluationError(f"Run '{run_id}' has no answer to evaluate")
 
     retrieval_step = get_trace_step(db, run_id, "retrieval")
+    citation_step = get_optional_trace_step(db, run_id, "citation_check")
 
     retrieved_chunks_payload = retrieval_step.output_data.get("retrieved_chunks", [])
 
@@ -80,15 +80,16 @@ def evaluate_rag_run(
     source_chunks = get_source_chunks(db, source_chunk_ids)
     source_text = "\n\n".join(chunk.chunk_text for chunk in source_chunks)
 
+    citation_accuracy_score = get_citation_accuracy_score(citation_step)
+
     metrics = build_metrics(
         query=run.input_query,
         answer=generated_answer,
         source_text=source_text,
         source_chunks=source_chunks,
         retrieved_scores=retrieved_scores,
+        citation_accuracy_score=citation_accuracy_score,
     )
-
-    citation_step = get_optional_trace_step(db, run_id, "citation_check")
 
     if citation_step is not None:
         metrics.extend(build_citation_metrics(citation_step))
@@ -108,7 +109,6 @@ def evaluate_rag_run(
         metrics=metrics,
     )
 
-
 def get_trace_step(db: Session, run_id: str, step_type: str) -> TraceStep:
     trace_step = db.execute(
         select(TraceStep)
@@ -126,7 +126,6 @@ def get_trace_step(db: Session, run_id: str, step_type: str) -> TraceStep:
 
     return trace_step
 
-
 def get_optional_trace_step(
     db: Session,
     run_id: str,
@@ -140,7 +139,6 @@ def get_optional_trace_step(
         )
         .order_by(TraceStep.step_index.asc())
     ).scalars().first()
-
 
 def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
     if not chunk_ids:
@@ -161,7 +159,6 @@ def get_source_chunks(db: Session, chunk_ids: list[str]) -> list[DocumentChunk]:
         for chunk_id in chunk_ids
         if chunk_id in chunk_by_id
     ]
-
 
 def get_generated_answer_for_evaluation(
     db: Session,
@@ -185,6 +182,16 @@ def get_generated_answer_for_evaluation(
 
     return run.output_answer
 
+def get_citation_accuracy_score(citation_step: Optional[TraceStep]) -> Optional[float]:
+    if citation_step is None:
+        return None
+
+    output_data = citation_step.output_data or {}
+
+    if "citation_accuracy_score" not in output_data:
+        return None
+
+    return float(output_data.get("citation_accuracy_score", 0.0))
 
 def build_metrics(
     query: str,
@@ -192,6 +199,7 @@ def build_metrics(
     source_text: str,
     source_chunks: list[DocumentChunk],
     retrieved_scores: list[float],
+    citation_accuracy_score: Optional[float] = None,
 ) -> list[MetricResult]:
     query_terms = extract_keywords(query)
     answer_terms = extract_keywords(answer)
@@ -204,8 +212,6 @@ def build_metrics(
         answer_support_score = len(supported_terms) / len(answer_terms)
     else:
         answer_support_score = 0.0
-
-    hallucination_risk = 1.0 - answer_support_score
 
     matched_query_terms = query_terms.intersection(answer_terms)
     missing_query_terms = query_terms.difference(answer_terms)
@@ -228,13 +234,31 @@ def build_metrics(
         source_chunks=source_chunks,
     )
 
+    evaluation_source_chunks = build_evaluation_source_chunks(
+        source_text=source_text,
+        source_chunks=source_chunks,
+    )
+
+    faithfulness_result = evaluate_faithfulness(
+        answer=answer,
+        source_chunks=evaluation_source_chunks,
+    )
+
+    hallucination_result = detect_hallucination(
+        answer=answer,
+        source_chunks=evaluation_source_chunks,
+        faithfulness_result=faithfulness_result,
+        citation_accuracy_score=citation_accuracy_score,
+    )
+
     retrieval_confidence = clamp(top_retrieval_score, 0.0, 1.0)
 
     overall_quality_score = (
-        0.40 * answer_support_score
+        0.30 * answer_support_score
         + 0.25 * query_answer_relevance_score
-        + 0.20 * retrieval_confidence
-        + 0.15 * source_coverage_score
+        + 0.20 * faithfulness_result.faithfulness_score
+        + 0.15 * retrieval_confidence
+        + 0.10 * source_coverage_score
     )
 
     return [
@@ -258,11 +282,60 @@ def build_metrics(
             },
         ),
         MetricResult(
-            metric_name="hallucination_risk",
-            metric_value=round(hallucination_risk, 4),
+            metric_name="faithfulness_score",
+            metric_value=faithfulness_result.faithfulness_score,
             details={
-                "definition": "1 - answer_support_score",
-                "unsupported_terms": sorted(unsupported_terms),
+                "definition": "supported claims divided by total extracted claims",
+                "supported_claims": faithfulness_result.supported_claims,
+                "unsupported_claims": faithfulness_result.unsupported_claims,
+                "total_claim_count": faithfulness_result.total_claim_count,
+                "supported_claim_count": faithfulness_result.supported_claim_count,
+                "unsupported_claim_count": faithfulness_result.unsupported_claim_count,
+            },
+        ),
+        MetricResult(
+            metric_name="unsupported_claim_count",
+            metric_value=float(faithfulness_result.unsupported_claim_count),
+            details={
+                "unsupported_claims": faithfulness_result.unsupported_claims,
+            },
+        ),
+        MetricResult(
+            metric_name="unsupported_claim_rate",
+            metric_value=faithfulness_result.unsupported_claim_rate,
+            details={
+                "total_claim_count": faithfulness_result.total_claim_count,
+                "unsupported_claim_count": faithfulness_result.unsupported_claim_count,
+            },
+        ),
+        MetricResult(
+            metric_name="hallucination_risk",
+            metric_value=hallucination_result.hallucination_risk_score,
+            details={
+                "definition": "max of unsupported claim rate, unsupported term rate, and citation penalty",
+                "risk_level": hallucination_result.risk_level,
+                "unsupported_claim_rate": hallucination_result.unsupported_claim_rate,
+                "unsupported_term_rate": hallucination_result.unsupported_term_rate,
+                "citation_penalty": hallucination_result.citation_penalty,
+                "unsupported_claims": hallucination_result.unsupported_claims,
+                "unsupported_terms": hallucination_result.unsupported_terms,
+                "reasons": hallucination_result.reasons,
+            },
+        ),
+        MetricResult(
+            metric_name="hallucination_detected",
+            metric_value=1.0 if hallucination_result.hallucination_detected else 0.0,
+            details={
+                "risk_level": hallucination_result.risk_level,
+                "reasons": hallucination_result.reasons,
+            },
+        ),
+        MetricResult(
+            metric_name="hallucination_rate",
+            metric_value=1.0 if hallucination_result.hallucination_detected else 0.0,
+            details={
+                "definition": "single-run hallucination indicator for aggregation",
+                "risk_score": hallucination_result.hallucination_risk_score,
             },
         ),
         MetricResult(
@@ -291,10 +364,11 @@ def build_metrics(
             metric_value=round(overall_quality_score, 4),
             details={
                 "weights": {
-                    "answer_support_score": 0.40,
+                    "answer_support_score": 0.30,
                     "query_answer_relevance_score": 0.25,
-                    "top_retrieval_score": 0.20,
-                    "source_coverage_score": 0.15,
+                    "faithfulness_score": 0.20,
+                    "top_retrieval_score": 0.15,
+                    "source_coverage_score": 0.10,
                 },
             },
         ),
@@ -309,7 +383,6 @@ def build_metrics(
             details={},
         ),
     ]
-
 
 def build_citation_metrics(citation_step: TraceStep) -> list[MetricResult]:
     output_data = citation_step.output_data or {}
@@ -362,6 +435,24 @@ def build_citation_metrics(citation_step: TraceStep) -> list[MetricResult]:
         ),
     ]
 
+def build_evaluation_source_chunks(
+    source_text: str,
+    source_chunks: list[DocumentChunk],
+) -> list[Any]:
+    if source_chunks:
+        return source_chunks
+
+    cleaned_source_text = " ".join(str(source_text or "").strip().split())
+
+    if not cleaned_source_text:
+        return []
+
+    return [
+        SimpleNamespace(
+            id="source_text_fallback",
+            chunk_text=cleaned_source_text,
+        )
+    ]
 
 def calculate_source_coverage_score(
     answer_terms: set[str],
@@ -379,7 +470,6 @@ def calculate_source_coverage_score(
             useful_chunks += 1
 
     return useful_chunks / len(source_chunks)
-
 
 def save_metrics(
     db: Session,
@@ -410,7 +500,6 @@ def save_metrics(
 
     db.commit()
 
-
 def extract_keywords(text: str) -> set[str]:
     stop_words = {
         "a", "an", "the", "is", "are", "was", "were", "do", "does", "did",
@@ -423,7 +512,6 @@ def extract_keywords(text: str) -> set[str]:
     }
 
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
-
     keywords = set()
 
     for token in tokens:
@@ -438,7 +526,6 @@ def extract_keywords(text: str) -> set[str]:
         keywords.add(normalized_token)
 
     return keywords
-
 
 def normalize_keyword(token: str) -> str:
     synonym_map = {
@@ -531,7 +618,6 @@ def normalize_keyword(token: str) -> str:
         return token[:-1]
 
     return token
-
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
