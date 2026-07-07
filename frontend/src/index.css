@@ -316,3 +316,247 @@ h1 {
     transform: rotate(360deg);
   }
 }
+
+.panel-hint {
+  margin: -0.25rem 0 0.85rem;
+  color: #8aa0b8;
+  font-size: 0.86rem;
+}
+
+.clickable-row {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.clickable-row:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.inspection-panel {
+  margin-top: 1rem;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 1.35rem;
+  padding: 1.15rem;
+  background:
+    radial-gradient(circle at top right, rgba(34, 197, 94, 0.08), transparent 24rem),
+    rgba(15, 23, 42, 0.82);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+}
+
+.inspection-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.inspection-header h2 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.25rem;
+}
+
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #dbeafe;
+  background: rgba(2, 6, 23, 0.35);
+}
+
+.ghost-button:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+}
+
+.inspection-state {
+  display: grid;
+  min-height: 10rem;
+  place-items: center;
+  color: #cbd5e1;
+  text-align: center;
+}
+
+.inspection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.detail-card {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.detail-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #dbeafe;
+  margin-bottom: 0.75rem;
+}
+
+.detail-title h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.11);
+  padding: 0.65rem 0;
+  color: #9fb0c3;
+}
+
+.info-row:first-of-type {
+  border-top: 0;
+}
+
+.info-row strong {
+  max-width: 65%;
+  color: #e5edf7;
+  text-align: right;
+  word-break: break-word;
+}
+
+.answer-text {
+  margin: 0;
+  color: #dbeafe;
+  line-height: 1.7;
+}
+
+.trace-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.trace-step-card {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.9rem;
+  padding: 0.9rem;
+  background: rgba(8, 17, 31, 0.6);
+}
+
+.trace-step-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.trace-step-top strong {
+  color: #f8fafc;
+}
+
+.trace-step-top p {
+  margin: 0.2rem 0 0;
+  color: #8aa0b8;
+}
+
+.trace-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #9fb0c3;
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.trace-step-meta span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.trace-error {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 0.7rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.09);
+}
+
+.json-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.json-block {
+  min-width: 0;
+}
+
+.json-block p {
+  margin: 0 0 0.35rem;
+  color: #bae6fd;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.json-block pre {
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0.7rem;
+  margin: 0;
+  padding: 0.75rem;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, 0.55);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.metric-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.metric-result-card {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.9rem;
+  padding: 0.85rem;
+  background: rgba(8, 17, 31, 0.6);
+}
+
+.metric-result-card p {
+  margin: 0;
+  color: #9fb0c3;
+  font-size: 0.8rem;
+}
+
+.metric-result-card strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: #f8fafc;
+  font-size: 1.25rem;
+}
+
+.metric-result-card span {
+  display: block;
+  margin-top: 0.3rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  word-break: break-word;
+}
+
+.muted-text {
+  color: #8aa0b8;
+}

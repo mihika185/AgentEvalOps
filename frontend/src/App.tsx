@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { fetchJson } from "./api";
+import RunInspectionPanel from "./RunInspectionPanel";
 import type {
   DashboardBenchmarkRun,
   DashboardExperiment,
@@ -24,6 +25,7 @@ import type {
 
 export default function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -173,9 +175,14 @@ export default function App() {
 
       <section className="content-grid">
         <Panel title="Recent Runs" icon={<BarChart3 size={20} />} wide>
+          <p className="panel-hint">Click any run to inspect trace steps and evaluations.</p>
           <div className="table-list">
             {dashboard.recent_runs.map((run) => (
-              <RunRow key={run.id} run={run} />
+              <RunRow
+                key={run.id}
+                run={run}
+                onSelect={() => setSelectedRunId(run.id)}
+              />
             ))}
           </div>
         </Panel>
@@ -199,6 +206,13 @@ export default function App() {
           </div>
         </Panel>
       </section>
+
+      {selectedRunId ? (
+        <RunInspectionPanel
+          runId={selectedRunId}
+          onClose={() => setSelectedRunId(null)}
+        />
+      ) : null}
     </PageShell>
   );
 }
@@ -268,9 +282,15 @@ function ScoreRow({
   );
 }
 
-function RunRow({ run }: { run: DashboardRun }) {
+function RunRow({
+  run,
+  onSelect,
+}: {
+  run: DashboardRun;
+  onSelect: () => void;
+}) {
   return (
-    <div className="row-card">
+    <button className="row-card clickable-row" onClick={onSelect}>
       <div>
         <div className="row-title">{run.input_query}</div>
         <div className="row-subtitle">
@@ -283,7 +303,7 @@ function RunRow({ run }: { run: DashboardRun }) {
         <StatusBadge status={run.status} passed={run.quality_gate_passed} />
         <span>{formatMs(run.latency_ms)}</span>
       </div>
-    </div>
+    </button>
   );
 }
 

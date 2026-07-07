@@ -70,3 +70,49 @@ export type DashboardBenchmarkRun = {
   started_at: string;
   completed_at: string | null;
 };
+
+export type RunInspection = {
+  run: RunDetail;
+  trace_steps: TraceStep[];
+  evaluation_results: EvaluationResult[];
+  quality_gate_results: EvaluationResult[];
+  summary: Record<string, unknown>;
+};
+
+export type RunDetail = {
+  id: string;
+  experiment_id?: string | null;
+  workflow_type: string;
+  status: string;
+  input_query: string;
+  output_answer?: string | null;
+  latency_ms: number | null;
+  error_message?: string | null;
+  created_at: string;
+  completed_at: string | null;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export type TraceStep = {
+  id?: string;
+  step_index: number;
+  step_name?: string | null;
+  step_type?: string | null;
+  status?: string | null;
+  latency_ms?: number | null;
+  input_data?: Record<string, unknown> | null;
+  output_data?: Record<string, unknown> | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export type EvaluationResult = {
+  id?: string;
+  evaluator_type: string;
+  metric_name: string;
+  metric_value: number;
+  details?: Record<string, unknown> | null;
+  created_at?: string | null;
+};
