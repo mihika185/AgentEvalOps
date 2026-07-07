@@ -116,3 +116,43 @@ export type EvaluationResult = {
   details?: Record<string, unknown> | null;
   created_at?: string | null;
 };
+
+export type ReportTarget = {
+  type: "experiment" | "benchmark";
+  id: string;
+};
+
+export type AggregateReport = {
+  report_type?: string;
+  service_version?: string;
+  generated_at?: string;
+  summary: Record<string, unknown>;
+  quality_gate_result: AggregateQualityGateResult | null;
+  readiness_decision: Record<string, unknown>;
+  details: Record<string, unknown>;
+};
+
+export type AggregateQualityGateResult = {
+  scope_type: string;
+  scope_id: string;
+  profile_name: string;
+  evaluator_type: string;
+  overall_passed: boolean;
+  passed_count: number;
+  failed_count: number;
+  total_gates: number;
+  pass_rate: number;
+  aggregate_metrics: Record<string, number>;
+  checks: AggregateQualityGateCheck[];
+};
+
+export type AggregateQualityGateCheck = {
+  gate_id: string;
+  gate_name: string;
+  metric_name: string;
+  metric_value: number;
+  operator: string;
+  threshold: number;
+  passed: boolean;
+  failure_reason?: string | null;
+};

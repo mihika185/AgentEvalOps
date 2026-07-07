@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import {
+import{ 
+  useEffect, useState
+} from "react";
+import{
   Activity,
   AlertTriangle,
   BarChart3,
@@ -14,22 +16,28 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { fetchJson } from "./api";
+import{
+  fetchJson
+} from "./api";
+
+import ReportPanel from "./ReportPanel";
 import RunInspectionPanel from "./RunInspectionPanel";
-import type {
+import type{
   DashboardBenchmarkRun,
   DashboardExperiment,
   DashboardRun,
   DashboardSummary,
+  ReportTarget,
 } from "./types";
 
-export default function App() {
+export default function App(){
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedReport, setSelectedReport] = useState<ReportTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadDashboard() {
+  async function loadDashboard(){
     try {
       setLoading(true);
       setError(null);
@@ -175,32 +183,60 @@ export default function App() {
 
       <section className="content-grid">
         <Panel title="Recent Runs" icon={<BarChart3 size={20} />} wide>
-          <p className="panel-hint">Click any run to inspect trace steps and evaluations.</p>
+          <p className="panel-hint">
+            Click any run to inspect trace steps and evaluations.
+          </p>
           <div className="table-list">
             {dashboard.recent_runs.map((run) => (
               <RunRow
                 key={run.id}
                 run={run}
-                onSelect={() => setSelectedRunId(run.id)}
+                onSelect={() => {
+                  setSelectedReport(null);
+                  setSelectedRunId(run.id);
+                }}
               />
             ))}
           </div>
         </Panel>
 
         <Panel title="Recent Experiments" icon={<GitBranch size={20} />}>
+          <p className="panel-hint">
+            Click an experiment to view aggregate readiness.
+          </p>
           <div className="stack">
             {dashboard.recent_experiments.map((experiment) => (
-              <ExperimentCard key={experiment.id} experiment={experiment} />
+              <ExperimentCard
+                key={experiment.id}
+                experiment={experiment}
+                onSelect={() => {
+                  setSelectedRunId(null);
+                  setSelectedReport({
+                    type: "experiment",
+                    id: experiment.id,
+                  });
+                }}
+              />
             ))}
           </div>
         </Panel>
 
         <Panel title="Recent Benchmark Runs" icon={<Database size={20} />} wide>
+          <p className="panel-hint">
+            Click any benchmark run to view aggregate quality gates.
+          </p>
           <div className="table-list">
             {dashboard.recent_benchmark_runs.map((benchmarkRun) => (
               <BenchmarkRunRow
                 key={benchmarkRun.id}
                 benchmarkRun={benchmarkRun}
+                onSelect={() => {
+                  setSelectedRunId(null);
+                  setSelectedReport({
+                    type: "benchmark",
+                    id: benchmarkRun.id,
+                  });
+                }}
               />
             ))}
           </div>
@@ -211,6 +247,13 @@ export default function App() {
         <RunInspectionPanel
           runId={selectedRunId}
           onClose={() => setSelectedRunId(null)}
+        />
+      ) : null}
+
+      {selectedReport ? (
+        <ReportPanel
+          target={selectedReport}
+          onClose={() => setSelectedReport(null)}
         />
       ) : null}
     </PageShell>
@@ -309,11 +352,13 @@ function RunRow({
 
 function ExperimentCard({
   experiment,
+  onSelect,
 }: {
   experiment: DashboardExperiment;
+  onSelect: () => void;
 }) {
   return (
-    <div className="small-card">
+    <button className="small-card clickable-card" onClick={onSelect}>
       <div className="row-title">{experiment.name}</div>
       <p>{experiment.description || "No description provided."}</p>
 
@@ -336,17 +381,19 @@ function ExperimentCard({
           </>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
 function BenchmarkRunRow({
   benchmarkRun,
+  onSelect,
 }: {
   benchmarkRun: DashboardBenchmarkRun;
+  onSelect: () => void;
 }) {
   return (
-    <div className="row-card">
+    <button className="row-card clickable-row" onClick={onSelect}>
       <div>
         <div className="row-title">
           {benchmarkRun.pipeline_config_name || benchmarkRun.id}
@@ -364,7 +411,7 @@ function BenchmarkRunRow({
         />
         <span>{formatPercent(benchmarkRun.pass_rate)}</span>
       </div>
-    </div>
+    </button>
   );
 }
 

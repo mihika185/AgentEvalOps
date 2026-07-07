@@ -560,3 +560,121 @@ h1 {
 .muted-text {
   color: #8aa0b8;
 }
+
+.clickable-card {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.clickable-card:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.report-panel {
+  border-color: rgba(134, 239, 172, 0.22);
+}
+
+.report-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.status-card {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.status-card div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #9fb0c3;
+  font-size: 0.84rem;
+}
+
+.status-card strong {
+  display: block;
+  margin-top: 0.45rem;
+  color: #f8fafc;
+  font-size: 1.35rem;
+  text-transform: capitalize;
+}
+
+.status-pass {
+  border-color: rgba(34, 197, 94, 0.24);
+}
+
+.status-pass div {
+  color: #86efac;
+}
+
+.status-warn {
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.status-warn div {
+  color: #fde68a;
+}
+
+.check-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.check-card {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.9rem;
+  padding: 0.85rem;
+  background: rgba(8, 17, 31, 0.6);
+}
+
+.check-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+}
+
+.check-card strong {
+  color: #f8fafc;
+}
+
+.check-card p {
+  margin: 0.25rem 0 0;
+  color: #8aa0b8;
+  font-size: 0.84rem;
+}
+
+.check-pass {
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.check-fail {
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+.check-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #cbd5e1;
+}
+
+.check-failure {
+  grid-column: 1 / -1;
+  border-radius: 0.7rem;
+  padding: 0.6rem;
+  color: #fca5a5 !important;
+  background: rgba(239, 68, 68, 0.09);
+}
+
+.json-block-full pre {
+  max-height: 22rem;
+}
