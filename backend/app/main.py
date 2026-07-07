@@ -15,6 +15,7 @@ from backend.app.api.agents import router as agents_router
 from backend.app.api.evaluations import router as evaluations_router
 from backend.app.api.experiments import router as experiments_router
 from backend.app.api.reports import router as reports_router
+from backend.app.api.dashboard import router as dashboard_router
 
 configure_logging()
 logger = get_logger(__name__)
@@ -38,6 +39,7 @@ app.include_router(agents_router, prefix=settings.api_prefix)
 app.include_router(evaluations_router, prefix=settings.api_prefix)
 app.include_router(experiments_router, prefix=settings.api_prefix)
 app.include_router(reports_router, prefix=settings.api_prefix)
+app.include_router(dashboard_router, prefix=settings.api_prefix)
 
 logger.info(
     "%s initialized in %s mode",
