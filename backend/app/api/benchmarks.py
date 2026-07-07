@@ -5,6 +5,10 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.api.aggregate_quality_gate_models import (
+    AggregateQualityGateSummaryResponse,
+    to_aggregate_quality_gate_summary_response,
+)
 from backend.app.database.connection import get_db
 from backend.app.database.models import(
     BenchmarkDataset,
@@ -17,6 +21,10 @@ from backend.app.database.models import(
 )
 from backend.app.rag.answer_service import SimpleExtractiveAnswerGenerator
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
+from backend.app.evaluation.experiment_quality_gates import (
+    AggregateQualityGateError,
+    evaluate_benchmark_run_quality_gates as run_benchmark_quality_gates,
+)
 from backend.app.evaluation.quality_gates import DEFAULT_QUALITY_GATE_PROFILE
 from backend.app.evaluation.retrieval_metrics import calculate_retrieval_metrics
 
@@ -491,6 +499,10 @@ def execute_benchmark_run(
                     "reranker_name": result.reranker_name,
                     "expected_relevant_chunk_ids": expected_relevant_chunk_ids(test_case),
                     "retrieval_metrics_available": bool(retrieval_metrics),
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "total_tokens": result.total_tokens,
+                    "estimated_cost": result.estimated_cost,
                 }
             )
 
@@ -995,6 +1007,36 @@ def analyze_benchmark_run_failures(
         )
     )
 
+@router.post(
+    "/runs/{benchmark_run_id}/quality-gates",
+    response_model=AggregateQualityGateSummaryResponse,
+)
+def evaluate_benchmark_run_aggregate_quality_gates(
+    benchmark_run_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    profile_name: str = Query(default="default-v1"),
+):
+    try:
+        summary = run_benchmark_quality_gates(
+            db=db,
+            benchmark_run_id=benchmark_run_id,
+            profile_name=profile_name,
+            persist=True,
+        )
+    except AggregateQualityGateError as exc:
+        http_status = (
+            status.HTTP_404_NOT_FOUND
+            if "was not found" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        raise HTTPException(
+            status_code=http_status,
+            detail=str(exc),
+        ) from exc
+
+    return to_aggregate_quality_gate_summary_response(summary)
+
 def metric_value(metrics: dict[str, float], name: str) -> Optional[float]:
     value = metrics.get(name)
 
@@ -1057,10 +1099,21 @@ def judge_benchmark_case(
     return False, f"Unsupported expected behavior: {expected_behavior}"
 
 def to_metrics_dict(result) -> dict[str, float]:
-    return {
+    metrics = {
         metric.metric_name: metric.metric_value
         for metric in result.evaluation_metrics
     }
+
+    metrics.update(
+        {
+            "prompt_tokens": float(getattr(result, "prompt_tokens", 0) or 0),
+            "completion_tokens": float(getattr(result, "completion_tokens", 0) or 0),
+            "total_tokens": float(getattr(result, "total_tokens", 0) or 0),
+            "estimated_cost": float(getattr(result, "estimated_cost", 0.0) or 0.0),
+        }
+    )
+
+    return metrics
 
 def pick_best_pipeline_result(
     results: list[PipelineBenchmarkResultResponse]
@@ -1259,10 +1312,34 @@ def finalize_benchmark_run(
     precision_scores = []
     mrr_scores = []
     ndcg_scores = []
+    estimated_cost_values = []
+    prompt_token_values = []
+    completion_token_values = []
+    total_token_values = []
 
     for item in run_items:
         if item.latency_ms is not None:
             latency_values.append(float(item.latency_ms))
+
+        estimated_cost = metric_value(item.metrics_json, "estimated_cost")
+
+        if estimated_cost is not None:
+            estimated_cost_values.append(estimated_cost)
+
+        prompt_tokens = metric_value(item.metrics_json, "prompt_tokens")
+
+        if prompt_tokens is not None:
+            prompt_token_values.append(prompt_tokens)
+
+        completion_tokens = metric_value(item.metrics_json, "completion_tokens")
+
+        if completion_tokens is not None:
+            completion_token_values.append(completion_tokens)
+
+        total_tokens = metric_value(item.metrics_json, "total_tokens")
+
+        if total_tokens is not None:
+            total_token_values.append(total_tokens)
 
         retrieval_metric_names = [
             metric_name
@@ -1336,6 +1413,11 @@ def finalize_benchmark_run(
         "average_precision_at_k": average(precision_scores),
         "average_mrr": average(mrr_scores),
         "average_ndcg_at_k": average(ndcg_scores),
+        "average_estimated_cost": average(estimated_cost_values) or 0.0,
+        "total_estimated_cost": round(sum(estimated_cost_values), 8),
+        "average_prompt_tokens": average(prompt_token_values) or 0.0,
+        "average_completion_tokens": average(completion_token_values) or 0.0,
+        "average_total_tokens": average(total_token_values) or 0.0,
     }
 
     benchmark_run.completed_at = utc_now()

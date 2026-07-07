@@ -6,8 +6,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from backend.app.api.aggregate_quality_gate_models import (
+    AggregateQualityGateSummaryResponse,
+    to_aggregate_quality_gate_summary_response,
+)
 from backend.app.database.connection import get_db
 from backend.app.database.models import EvaluationResult, Experiment, Run
+from backend.app.evaluation.experiment_quality_gates import (
+    AggregateQualityGateError,
+    evaluate_experiment_quality_gates as run_experiment_quality_gates,
+)
 
 
 router = APIRouter(
@@ -314,6 +322,36 @@ def inspect_experiment(
             evaluation_results=evaluation_results,
         ),
     )
+
+@router.post(
+    "/{experiment_id}/quality-gates",
+    response_model=AggregateQualityGateSummaryResponse,
+)
+def evaluate_experiment_aggregate_quality_gates(
+    experiment_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    profile_name: str = Query(default="default-v1"),
+):
+    try:
+        summary = run_experiment_quality_gates(
+            db=db,
+            experiment_id=experiment_id,
+            profile_name=profile_name,
+            persist=True,
+        )
+    except AggregateQualityGateError as exc:
+        http_status = (
+            status.HTTP_404_NOT_FOUND
+            if "was not found" in str(exc)
+            else status.HTTP_400_BAD_REQUEST
+        )
+
+        raise HTTPException(
+            status_code=http_status,
+            detail=str(exc),
+        ) from exc
+
+    return to_aggregate_quality_gate_summary_response(summary)
 
 def create_experiment_id() -> str:
     return f"exp_{uuid4().hex[:12]}"

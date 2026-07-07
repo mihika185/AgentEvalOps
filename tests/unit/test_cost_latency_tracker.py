@@ -6,7 +6,6 @@ from backend.app.evaluation.cost_latency_tracker import (
     track_answer_generation_usage,
 )
 
-
 class FakeGenerator:
     generator_name = "extractive:simple-extractive-v2"
 
