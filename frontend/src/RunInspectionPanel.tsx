@@ -196,7 +196,7 @@ function TraceStepCard({ step }: { step: TraceStep }) {
       <div className="trace-step-top">
         <div>
           <strong>
-            #{step.step_index} {step.step_name || "Unnamed step"}
+            #{step.step_index} {toLabel(step.step_name || step.step_type || "trace step")}
           </strong>
           <p>{step.step_type || "trace step"}</p>
         </div>

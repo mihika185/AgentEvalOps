@@ -276,7 +276,7 @@ function toLabel(value: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function formatUnknown(value: unknown) {
+function formatUnknown(value: unknown): string {
   if (value === null || value === undefined) {
     return "—";
   }
@@ -289,15 +289,65 @@ function formatUnknown(value: unknown) {
     return value ? "true" : "false";
   }
 
-  if (Array.isArray(value)) {
-    return value.length === 0 ? "None" : value.join(", ");
+  if (typeof value === "string") {
+    return value;
   }
 
-  if (typeof value === "object") {
-    return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "None";
+    }
+
+    if (value.every((item) => typeof item !== "object")) {
+      return value.join(", ");
+    }
+
+    return `${value.length} items`;
+  }
+
+  if (isRecord(value)) {
+    return summarizeObject(value);
   }
 
   return String(value);
+}
+
+function summarizeObject(value: Record<string, unknown>): string {
+  if (typeof value.name === "string" && typeof value.id === "string") {
+    return `${value.name} (${value.id})`;
+  }
+
+  if (typeof value.name === "string") {
+    return value.name;
+  }
+
+  if (typeof value.id === "string") {
+    return value.id;
+  }
+
+  if ("total_runs" in value && "completed_runs" in value) {
+    return `${formatUnknown(value.completed_runs)}/${formatUnknown(
+      value.total_runs
+    )} runs completed`;
+  }
+
+  if ("total_cases" in value && "passed_cases" in value) {
+    return `${formatUnknown(value.passed_cases)}/${formatUnknown(
+      value.total_cases
+    )} cases passed`;
+  }
+
+  if ("average_overall_quality_score" in value) {
+    return `Average quality ${formatUnknown(
+      value.average_overall_quality_score
+    )}`;
+  }
+
+  return `${Object.keys(value).length} fields`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function formatMetric(value: number | null | undefined) {
