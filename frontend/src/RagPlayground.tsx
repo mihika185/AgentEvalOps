@@ -1,5 +1,9 @@
-import { useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import{ 
+  useState 
+} from "react";
+import type{ 
+  FormEvent, ReactNode 
+} from "react";
 import {
   AlertTriangle,
   FileText,
@@ -10,7 +14,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-import { postJson } from "./api";
+import{ 
+  postJson 
+} from "./api";
 import type {
   RAGAnswerRequest,
   RAGAnswerResponse,
@@ -84,7 +90,7 @@ export default function RagPlayground({ onInspectRun }: RagPlaygroundProps) {
   }
 
   return (
-    <section className="rag-playground">
+    <section id="rag-playground" className="rag-playground">
       <div className="rag-playground-header">
         <div>
           <p className="eyebrow">RAG Playground</p>

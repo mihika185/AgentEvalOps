@@ -1,7 +1,7 @@
-import{ 
+import {
   useEffect, useState
 } from "react";
-import{
+import {
   Activity,
   AlertTriangle,
   BarChart3,
@@ -16,13 +16,13 @@ import{
   ShieldCheck,
 } from "lucide-react";
 
-import{
+import {
   fetchJson
 } from "./api";
 
 import ReportPanel from "./ReportPanel";
 import RunInspectionPanel from "./RunInspectionPanel";
-import type{
+import type {
   DashboardBenchmarkRun,
   DashboardExperiment,
   DashboardRun,
@@ -32,14 +32,14 @@ import type{
 import RagPlayground from "./RagPlayground";
 import DocumentExplorer from "./DocumentExplorer";
 
-export default function App(){
+export default function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedReport, setSelectedReport] = useState<ReportTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  async function loadDashboard(){
+  async function loadDashboard() {
     try {
       setLoading(true);
       setError(null);
@@ -98,14 +98,15 @@ export default function App(){
           <span>{dashboard.service_version}</span>
         </div>
       </header>
+      <SectionNav />
       <RagPlayground
         onInspectRun={(runId) => {
-        setSelectedReport(null);
-        setSelectedRunId(runId);
+          setSelectedReport(null);
+          setSelectedRunId(runId);
         }}
       />
       <DocumentExplorer />
-      <section className="metric-grid">
+      <section id="dashboard-overview" className="metric-grid">
         <MetricCard
           label="Documents"
           value={dashboard.counts.documents}
@@ -189,7 +190,7 @@ export default function App(){
         </Panel>
       </section>
 
-      <section className="content-grid">
+      <section id="recent-activity" className="content-grid">
         <Panel title="Recent Runs" icon={<BarChart3 size={20} />} wide>
           <p className="panel-hint">
             Click any run to inspect trace steps and evaluations.
@@ -269,7 +270,46 @@ export default function App(){
 }
 
 function PageShell({ children }: { children: React.ReactNode }) {
-  return <main className="page">{children}</main>;
+  return (
+    <main id="top" className="page">
+      {children}
+    </main>
+  );
+}
+
+function SectionNav() {
+  const links = [
+    {
+      href: "#top",
+      label: "Top",
+    },
+    {
+      href: "#rag-playground",
+      label: "RAG Playground",
+    },
+    {
+      href: "#document-explorer",
+      label: "Documents",
+    },
+    {
+      href: "#dashboard-overview",
+      label: "Metrics",
+    },
+    {
+      href: "#recent-activity",
+      label: "Runs & Reports",
+    },
+  ];
+
+  return (
+    <nav className="section-nav" aria-label="Dashboard sections">
+      {links.map((link) => (
+        <a key={link.href} href={link.href}>
+          {link.label}
+        </a>
+      ))}
+    </nav>
+  );
 }
 
 function MetricCard({
