@@ -938,3 +938,233 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.7rem;
 }
+
+.document-explorer {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 1.35rem;
+  margin-bottom: 1rem;
+  padding: 1.15rem;
+  background:
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.08), transparent 24rem),
+    rgba(15, 23, 42, 0.74);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+}
+
+.document-explorer-header,
+.chunk-panel-header,
+.chunk-card-top,
+.document-card-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.document-explorer-header {
+  margin-bottom: 1rem;
+}
+
+.document-explorer-header h2 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.document-explorer-header p {
+  max-width: 760px;
+  margin: 0.4rem 0 0;
+  color: #9fb0c3;
+  line-height: 1.6;
+}
+
+.document-layout {
+  display: grid;
+  grid-template-columns: 0.85fr 1.7fr;
+  gap: 1rem;
+}
+
+.document-list-panel,
+.chunk-panel {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.mini-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #dbeafe;
+  margin-bottom: 0.85rem;
+}
+
+.mini-panel-title h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.document-list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 36rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.document-card {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.9rem;
+  padding: 0.85rem;
+  color: inherit;
+  background: rgba(8, 17, 31, 0.55);
+  text-align: left;
+  font: inherit;
+}
+
+.document-card:hover,
+.selected-document {
+  border-color: rgba(125, 211, 252, 0.45);
+  background: rgba(14, 165, 233, 0.09);
+}
+
+.document-card strong {
+  color: #f8fafc;
+}
+
+.document-card p {
+  margin: 0.25rem 0 0.75rem;
+  color: #8aa0b8;
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
+.document-card-footer {
+  align-items: center;
+  color: #9fb0c3;
+  font-size: 0.82rem;
+}
+
+.document-id-pill {
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.08);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.document-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.info-box {
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0.75rem;
+  padding: 0.65rem;
+  background: rgba(8, 17, 31, 0.5);
+}
+
+.info-box span {
+  display: block;
+  color: #8aa0b8;
+  font-size: 0.72rem;
+}
+
+.info-box strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: #f8fafc;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.chunk-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 42rem;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.chunk-card {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 0.9rem;
+  padding: 0.9rem;
+  background: rgba(8, 17, 31, 0.58);
+}
+
+.chunk-card strong {
+  color: #f8fafc;
+}
+
+.chunk-card-top p {
+  margin: 0.2rem 0 0;
+  color: #8aa0b8;
+  font-size: 0.8rem;
+  word-break: break-word;
+}
+
+.chunk-index {
+  color: #7dd3fc;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.chunk-text {
+  margin: 0.75rem 0;
+  color: #dbeafe;
+  line-height: 1.65;
+}
+
+.chunk-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chunk-meta-row span {
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 999px;
+  padding: 0.25rem 0.52rem;
+  color: #bae6fd;
+  background: rgba(14, 165, 233, 0.08);
+  font-size: 0.76rem;
+}
+
+.metadata-details {
+  margin-top: 0.75rem;
+}
+
+.metadata-details summary {
+  color: #86efac;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.metadata-details pre {
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0.7rem;
+  margin: 0.65rem 0 0;
+  padding: 0.75rem;
+  color: #cbd5e1;
+  background: rgba(2, 6, 23, 0.55);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.document-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 8rem;
+  color: #9fb0c3;
+}

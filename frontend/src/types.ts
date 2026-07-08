@@ -223,3 +223,27 @@ export type RAGAnswerResponse = {
   failed_quality_gates: string[];
   response_blocked_by_quality_gate: boolean;
 };
+
+export type DocumentRecord = {
+  id: string;
+  filename: string;
+  file_type: string;
+  status: string;
+  num_pages: number | null;
+  num_chunks: number | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DocumentChunk = {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  chunk_text: string;
+  page_number: number | null;
+  token_count: number | null;
+  embedding_id: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+};

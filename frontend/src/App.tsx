@@ -30,6 +30,7 @@ import type{
   ReportTarget,
 } from "./types";
 import RagPlayground from "./RagPlayground";
+import DocumentExplorer from "./DocumentExplorer";
 
 export default function App(){
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -103,6 +104,7 @@ export default function App(){
         setSelectedRunId(runId);
         }}
       />
+      <DocumentExplorer />
       <section className="metric-grid">
         <MetricCard
           label="Documents"
