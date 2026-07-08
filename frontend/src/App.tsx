@@ -29,6 +29,7 @@ import type{
   DashboardSummary,
   ReportTarget,
 } from "./types";
+import RagPlayground from "./RagPlayground";
 
 export default function App(){
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -96,7 +97,12 @@ export default function App(){
           <span>{dashboard.service_version}</span>
         </div>
       </header>
-
+      <RagPlayground
+        onInspectRun={(runId) => {
+        setSelectedReport(null);
+        setSelectedRunId(runId);
+        }}
+      />
       <section className="metric-grid">
         <MetricCard
           label="Documents"

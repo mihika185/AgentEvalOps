@@ -678,3 +678,263 @@ h1 {
 .json-block-full pre {
   max-height: 22rem;
 }
+
+.rag-playground {
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 1.35rem;
+  margin-bottom: 1rem;
+  padding: 1.15rem;
+  background:
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.1), transparent 24rem),
+    rgba(15, 23, 42, 0.78);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+
+.rag-playground-header,
+.rag-result-top,
+.rag-item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rag-playground-header {
+  margin-bottom: 1rem;
+}
+
+.rag-playground-header h2,
+.rag-result-top h3 {
+  margin: 0;
+  color: #f8fafc;
+}
+
+.rag-playground-header p {
+  max-width: 760px;
+  margin: 0.4rem 0 0;
+  color: #9fb0c3;
+  line-height: 1.6;
+}
+
+.rag-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.query-box {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.query-box span,
+.control-group span {
+  color: #bae6fd;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.query-box textarea,
+.control-group input,
+.control-group select {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  color: #e5edf7;
+  background: rgba(2, 6, 23, 0.5);
+  font: inherit;
+  outline: none;
+}
+
+.query-box textarea:focus,
+.control-group input:focus,
+.control-group select:focus {
+  border-color: rgba(125, 211, 252, 0.55);
+}
+
+.rag-controls {
+  display: grid;
+  grid-template-columns: 1fr 0.5fr 0.7fr 0.9fr 1fr 1fr auto auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.control-group {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.checkbox-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.9rem;
+  color: #dbeafe;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.checkbox-control input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.run-rag-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.9rem;
+  white-space: nowrap;
+}
+
+.run-rag-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.rag-error,
+.rag-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 0.9rem;
+  margin-top: 1rem;
+  padding: 0.8rem;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.rag-warning strong {
+  color: #fecaca;
+}
+
+.rag-warning p {
+  margin: 0.25rem 0 0;
+}
+
+.rag-result {
+  border-top: 1px solid rgba(148, 163, 184, 0.13);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+
+.rag-badge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.compact-button {
+  padding: 0.45rem 0.7rem;
+}
+
+.rag-answer-card,
+.rag-result-section,
+.rag-item-card,
+.rag-metric-box {
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  border-radius: 1rem;
+  background: rgba(2, 6, 23, 0.36);
+}
+
+.rag-answer-card {
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.rag-answer-card h4 {
+  margin: 0 0 0.5rem;
+  color: #dbeafe;
+}
+
+.rag-answer-card p {
+  margin: 0;
+  color: #e5edf7;
+  line-height: 1.7;
+}
+
+.rag-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.8rem;
+}
+
+.rag-metric-box {
+  padding: 0.85rem;
+}
+
+.rag-metric-box span {
+  display: block;
+  color: #8aa0b8;
+  font-size: 0.78rem;
+}
+
+.rag-metric-box strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: #f8fafc;
+  font-size: 1.2rem;
+}
+
+.rag-two-column {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.rag-result-section {
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.rag-card-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.rag-item-card {
+  padding: 0.9rem;
+}
+
+.rag-item-card strong {
+  color: #f8fafc;
+}
+
+.rag-item-card p {
+  margin: 0.6rem 0 0;
+  color: #cbd5e1;
+  line-height: 1.6;
+}
+
+.rag-item-top span {
+  color: #7dd3fc;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.matched-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+}
+
+.matched-terms span {
+  border-radius: 999px;
+  padding: 0.22rem 0.5rem;
+  color: #86efac;
+  background: rgba(34, 197, 94, 0.1);
+  font-size: 0.76rem;
+}
+
+.rag-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}

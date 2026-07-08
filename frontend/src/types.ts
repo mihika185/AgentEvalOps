@@ -156,3 +156,70 @@ export type AggregateQualityGateCheck = {
   passed: boolean;
   failure_reason?: string | null;
 };
+
+export type RetrievalProvider = "dense" | "bm25" | "hybrid";
+
+export type RAGAnswerRequest = {
+  query: string;
+  top_k: number;
+  rerank: boolean;
+  candidate_multiplier: number;
+  document_id?: string;
+  experiment_id?: string;
+  retrieval_provider: RetrievalProvider;
+  quality_gate_profile: string;
+};
+
+export type RAGSourceChunk = {
+  chunk_id: string;
+  document_id: string;
+  score: number;
+  text: string;
+  metadata: Record<string, unknown>;
+};
+
+export type RAGCitation = {
+  source_number: number;
+  chunk_id: string;
+  document_id: string;
+  retrieval_score: number;
+  support_score: number;
+  matched_terms: string[];
+  text_excerpt: string;
+  metadata: Record<string, unknown>;
+};
+
+export type RAGEvaluationMetric = {
+  metric_name: string;
+  metric_value: number;
+  details: Record<string, unknown>;
+};
+
+export type RAGAnswerResponse = {
+  run_id: string;
+  query: string;
+  answer: string;
+  retrieval_provider: string;
+  source_chunks: RAGSourceChunk[];
+  citations: RAGCitation[];
+  citation_check_passed: boolean;
+  citation_accuracy_score: number;
+  citation_failed_reasons: string[];
+  retrieval_top_k: number;
+  retrieved_chunk_count: number;
+  document_id: string | null;
+  answer_generator: string;
+  reranker_used: boolean;
+  reranker_name: string | null;
+  total_latency_ms: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost: number;
+  evaluation_metrics: RAGEvaluationMetric[];
+  quality_gate_profile: string;
+  quality_gate_passed: boolean;
+  quality_gate_pass_rate: number;
+  failed_quality_gates: string[];
+  response_blocked_by_quality_gate: boolean;
+};
