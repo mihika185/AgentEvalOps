@@ -247,3 +247,11 @@ export type DocumentChunk = {
   metadata_json: Record<string, unknown> | null;
   created_at: string;
 };
+
+export type UploadedIndexedDocumentResponse = DocumentRecord & {
+  indexed_chunks: number;
+  vector_collection: string;
+  embedding_provider: string;
+  embedding_model: string;
+  embedding_dimension: number;
+};

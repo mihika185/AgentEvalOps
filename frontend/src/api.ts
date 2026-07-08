@@ -33,3 +33,21 @@ export async function postJson<TResponse, TPayload>(
 
   return response.json() as Promise<TResponse>;
 }
+
+export async function postForm<TResponse>(
+  path: string,
+  formData: FormData
+): Promise<TResponse> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<TResponse>;
+}
