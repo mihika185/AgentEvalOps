@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from backend.app.database.connection import get_db
 from backend.app.database.models import Document
 from backend.app.database.schemas import DocumentCreate, DocumentRead, DocumentUpdate
+from backend.app.embeddings.embedding_provider import get_default_embedding_provider
 from backend.app.ingestion.ingestion_service import IngestionError, ingest_document_file
 from backend.app.indexing.indexing_service import IndexingError, index_document_chunks
 from backend.app.logging_config import get_logger
+from backend.app.vector_store.qdrant_store import QdrantStore, VectorStoreError
 
 router = APIRouter(
     prefix="/documents",
@@ -26,6 +28,12 @@ class UploadedIndexedDocumentResponse(DocumentRead):
 
 logger = get_logger(__name__)
 
+def delete_document_vectors(document_id: str) -> None:
+    provider = get_default_embedding_provider()
+    vector_store = QdrantStore(vector_size=provider.dimension)
+
+    vector_store.delete_document_vectors(document_id)
+
 def get_document_or_404(document_id: str, db: Session) -> Document:
     document = db.get(Document, document_id)
 
@@ -37,7 +45,11 @@ def get_document_or_404(document_id: str, db: Session) -> Document:
 
     return document
 
-@router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+        "", 
+        response_model=DocumentRead, 
+        status_code=status.HTTP_201_CREATED
+)
 def create_document(
     payload: DocumentCreate,
     db: Annotated[Session, Depends(get_db)]
@@ -56,7 +68,10 @@ def create_document(
 
     return document
 
-@router.get("", response_model=list[DocumentRead])
+@router.get(
+        "", 
+        response_model=list[DocumentRead]
+)
 def list_documents(
     db: Annotated[Session, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -165,14 +180,20 @@ async def upload_and_index_document(
         if temp_path is not None and temp_path.exists():
             temp_path.unlink()
 
-@router.get("/{document_id}", response_model=DocumentRead)
+@router.get(
+        "/{document_id}", 
+        response_model=DocumentRead
+)
 def get_document(
     document_id: str,
     db: Annotated[Session, Depends(get_db)]
 ):
     return get_document_or_404(document_id, db)
 
-@router.patch("/{document_id}", response_model=DocumentRead)
+@router.patch(
+        "/{document_id}", 
+        response_model=DocumentRead
+)
 def update_document(
     document_id: str,
     payload: DocumentUpdate,
@@ -192,16 +213,27 @@ def update_document(
 
     return document
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+        "/{document_id}", 
+        status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_document(
     document_id: str,
     db: Annotated[Session, Depends(get_db)]
 ):
     document = get_document_or_404(document_id, db)
 
+    try:
+        delete_document_vectors(document_id=document_id)
+    except VectorStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete vectors for document '{document_id}': {exc}",
+        ) from exc
+
     db.delete(document)
     db.commit()
 
-    logger.info("Deleted document record: %s", document_id)
+    logger.info("Deleted document record and vectors: %s", document_id)
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
