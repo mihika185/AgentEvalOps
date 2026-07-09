@@ -15,13 +15,14 @@ router = APIRouter(
 )
 
 AnswerGeneratorProvider = Literal["extractive", "groq"]
+RetrievalProvider = Literal["dense", "bm25", "hybrid"]
 QualityGateProfile = Literal["default-v1", "strict-v1", "lenient-v1"]
 
 class PipelineConfigCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
 
-    retrieval_provider: str = "qdrant_vector_search"
+    retrieval_provider: RetrievalProvider = "hybrid"
     top_k: int = Field(default=3, ge=1, le=20)
 
     answer_generator_provider: AnswerGeneratorProvider = "extractive"
@@ -55,7 +56,7 @@ class PipelineConfigUpdateRequest(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = None
 
-    retrieval_provider: Optional[str] = None
+    retrieval_provider: Optional[RetrievalProvider] = None
     top_k: Optional[int] = Field(default=None, ge=1, le=20)
 
     answer_generator_provider: Optional[AnswerGeneratorProvider] = None
@@ -107,6 +108,10 @@ class PipelineConfigResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class DefaultPipelineConfigsCreateResponse(BaseModel):
+    created_count: int
+    configs: list[PipelineConfigResponse]
+
 def get_pipeline_config_or_404(
     pipeline_config_id: str,
     db: Session
@@ -120,6 +125,109 @@ def get_pipeline_config_or_404(
         )
 
     return pipeline_config
+
+@router.post(
+    "/defaults",
+    response_model=DefaultPipelineConfigsCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_default_pipeline_configs(
+    db: Annotated[Session, Depends(get_db)],
+):
+    default_configs = [
+        {
+            "name": "BM25 Baseline",
+            "description": "Keyword retrieval baseline without reranking.",
+            "retrieval_provider": "bm25",
+            "top_k": 3,
+            "metadata_json": {
+                "rerank": False,
+                "candidate_multiplier": 3,
+                "comparison_group": "default_retrieval_configs",
+            },
+        },
+        {
+            "name": "Dense Retrieval",
+            "description": "Dense vector retrieval baseline without reranking.",
+            "retrieval_provider": "dense",
+            "top_k": 3,
+            "metadata_json": {
+                "rerank": False,
+                "candidate_multiplier": 3,
+                "comparison_group": "default_retrieval_configs",
+            },
+        },
+        {
+            "name": "Hybrid Retrieval",
+            "description": "Hybrid BM25 plus dense retrieval without reranking.",
+            "retrieval_provider": "hybrid",
+            "top_k": 3,
+            "metadata_json": {
+                "rerank": False,
+                "candidate_multiplier": 3,
+                "comparison_group": "default_retrieval_configs",
+            },
+        },
+        {
+            "name": "Hybrid Retrieval + Rerank",
+            "description": "Hybrid retrieval with cross-encoder reranking enabled.",
+            "retrieval_provider": "hybrid",
+            "top_k": 3,
+            "metadata_json": {
+                "rerank": True,
+                "candidate_multiplier": 3,
+                "comparison_group": "default_retrieval_configs",
+            },
+        },
+    ]
+
+    created_count = 0
+
+    for config_payload in default_configs:
+        existing_config = db.execute(
+            select(PipelineConfig)
+            .where(PipelineConfig.name == config_payload["name"])
+        ).scalar_one_or_none()
+
+        if existing_config is not None:
+            continue
+
+        pipeline_config = PipelineConfig(
+            name=config_payload["name"],
+            description=config_payload["description"],
+            retrieval_provider=config_payload["retrieval_provider"],
+            top_k=config_payload["top_k"],
+            answer_generator_provider="extractive",
+            answer_generator_model="simple-extractive-v1",
+            embedding_provider="sentence-transformers",
+            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            quality_gate_profile="default-v1",
+            is_active=True,
+            metadata_json=config_payload["metadata_json"],
+        )
+
+        db.add(pipeline_config)
+        created_count += 1
+
+    db.commit()
+
+    configs = db.execute(
+        select(PipelineConfig)
+        .where(
+            PipelineConfig.name.in_(
+                [config_payload["name"] for config_payload in default_configs]
+            )
+        )
+        .order_by(PipelineConfig.created_at.asc())
+    ).scalars().all()
+
+    return DefaultPipelineConfigsCreateResponse(
+        created_count=created_count,
+        configs=[
+            to_pipeline_config_response(config)
+            for config in configs
+        ],
+    )
 
 @router.post(
     "",
