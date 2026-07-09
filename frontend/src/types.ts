@@ -255,3 +255,32 @@ export type UploadedIndexedDocumentResponse = DocumentRecord & {
   embedding_model: string;
   embedding_dimension: number;
 };
+
+export type AgentRunRequest = {
+  query: string;
+  document_id?: string;
+  retrieval_provider: string;
+  experiment_id?: string;
+  top_k: number;
+  rerank: boolean;
+  candidate_multiplier: number;
+  max_steps: number;
+};
+
+export type AgentToolCall = {
+  tool_name: string;
+  input_data: Record<string, unknown>;
+  output_data: Record<string, unknown>;
+  success: boolean;
+  error_message: string | null;
+};
+
+export type AgentRunResponse = {
+  run_id: string;
+  query: string;
+  final_answer: string;
+  status: string;
+  tool_calls: AgentToolCall[];
+  total_latency_ms: number;
+  metadata: Record<string, unknown>;
+};

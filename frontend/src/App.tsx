@@ -31,6 +31,7 @@ import type {
 } from "./types";
 import RagPlayground from "./RagPlayground";
 import DocumentExplorer from "./DocumentExplorer";
+import AgentPlayground from "./AgentPlayground";
 
 export default function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -100,12 +101,20 @@ export default function App() {
       </header>
       <SectionNav />
       <RagPlayground
-        onInspectRun={(runId) => {
+        onInspectRun={(runId: string) => {
           setSelectedReport(null);
           setSelectedRunId(runId);
         }}
       />
-      <DocumentExplorer />
+
+      <AgentPlayground
+        onInspectRun={(runId: string) => {
+          setSelectedReport(null);
+          setSelectedRunId(runId);
+        }}
+      />
+
+<DocumentExplorer />
       <section id="dashboard-overview" className="metric-grid">
         <MetricCard
           label="Documents"
@@ -286,6 +295,10 @@ function SectionNav() {
     {
       href: "#rag-playground",
       label: "RAG Playground",
+    },
+    {
+      href: "#agent-playground",
+      label: "Agents",
     },
     {
       href: "#document-explorer",
