@@ -32,6 +32,7 @@ import type {
 import RagPlayground from "./RagPlayground";
 import DocumentExplorer from "./DocumentExplorer";
 import AgentPlayground from "./AgentPlayground";
+import ExperimentComparison from "./ExperimentComparison";
 
 export default function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -115,7 +116,13 @@ export default function App() {
       />
 
 <DocumentExplorer />
-      <section id="dashboard-overview" className="metric-grid">
+        <ExperimentComparison
+          onOpenReport={(target) => {
+            setSelectedRunId(null);
+            setSelectedReport(target);
+          }}
+        />
+        <section id="dashboard-overview" className="metric-grid">
         <MetricCard
           label="Documents"
           value={dashboard.counts.documents}
@@ -303,6 +310,10 @@ function SectionNav() {
     {
       href: "#document-explorer",
       label: "Documents",
+    },
+    {
+      href: "#experiment-comparison",
+      label: "Compare",
     },
     {
       href: "#dashboard-overview",

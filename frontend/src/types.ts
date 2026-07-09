@@ -284,3 +284,49 @@ export type AgentRunResponse = {
   total_latency_ms: number;
   metadata: Record<string, unknown>;
 };
+
+export type ExperimentRecord = {
+  id: string;
+  name: string;
+  description: string | null;
+  retriever_type: string;
+  llm_provider: string;
+  llm_model: string;
+  prompt_version: string;
+  chunking_strategy: string;
+  reranker_enabled: boolean;
+  metadata_json: Record<string, unknown>;
+  run_count: number;
+  created_at: string;
+};
+
+export type ExperimentListResponse = {
+  total: number;
+  limit: number;
+  offset: number;
+  experiments: ExperimentRecord[];
+};
+
+export type BenchmarkRunComparisonRecord = {
+  id: string;
+  dataset_id: string;
+  status: string;
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  answerable_cases: number;
+  answerable_passed: number;
+  unanswerable_cases: number;
+  unanswerable_passed: number;
+  answerable_accuracy: number | null;
+  unanswerable_accuracy: number | null;
+  pass_rate: number | null;
+  average_answer_support_score: number | null;
+  average_query_answer_relevance_score: number | null;
+  average_hallucination_risk: number | null;
+  average_overall_quality_score: number | null;
+  average_latency_ms: number | null;
+  metadata_json: Record<string, unknown>;
+  started_at: string;
+  completed_at: string | null;
+};
