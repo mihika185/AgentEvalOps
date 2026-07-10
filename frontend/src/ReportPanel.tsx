@@ -2,9 +2,13 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
+  Gauge,
   Loader2,
+  SearchCheck,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -87,7 +91,38 @@ export default function ReportPanel({ target, onClose }: ReportPanelProps) {
 
 function ReportContent({ report }: { report: AggregateReport }) {
   const qualityGate = report.quality_gate_result;
-  const readinessStatus = readStatus(report.readiness_decision);
+  const readinessDecision = safeRecord(report.readiness_decision);
+  const summary = safeRecord(report.summary);
+  const details = safeRecord(report.details);
+
+  const benchmarkRun = getRecord(summary, "benchmark_run");
+  const cases = getRecord(summary, "cases");
+  const failureCategories = getRecord(summary, "failure_categories");
+  const benchmarkMetadata = getRecord(benchmarkRun, "metadata_json");
+  const aggregateMetrics = qualityGate?.aggregate_metrics || {};
+
+  const failedItems = getArray(details, "failed_items");
+  const readinessStatus = readStatus(readinessDecision);
+  const ready = readinessDecision.ready === true;
+
+  const passRate =
+    getNumber(cases, "pass_rate") ??
+    getNumber(benchmarkRun, "pass_rate") ??
+    aggregateMetrics.pass_rate ??
+    qualityGate?.pass_rate;
+
+  const failedCases =
+    getNumber(cases, "failed_cases") ??
+    getNumber(benchmarkRun, "failed_cases") ??
+    aggregateMetrics.failed_cases;
+
+  const totalCases =
+    getNumber(cases, "total_cases") ??
+    getNumber(benchmarkRun, "total_cases") ??
+    aggregateMetrics.total_cases;
+
+  const pipelineName = getString(benchmarkMetadata, "pipeline_config_name");
+  const datasetName = getString(benchmarkMetadata, "dataset_name");
 
   return (
     <>
@@ -95,7 +130,7 @@ function ReportContent({ report }: { report: AggregateReport }) {
         <StatusCard
           title="Readiness"
           value={readinessStatus}
-          passed={readinessStatus.toLowerCase() === "ready"}
+          passed={ready}
           icon={<ClipboardCheck size={19} />}
         />
         <StatusCard
@@ -105,61 +140,202 @@ function ReportContent({ report }: { report: AggregateReport }) {
           icon={<ShieldCheck size={19} />}
         />
         <StatusCard
-          title="Gate Pass Rate"
-          value={formatPercent(qualityGate?.pass_rate)}
-          passed={(qualityGate?.pass_rate || 0) >= 0.8}
+          title="Case Pass Rate"
+          value={formatPercent(passRate)}
+          passed={(passRate || 0) >= 0.8}
           icon={<CheckCircle2 size={19} />}
+        />
+        <StatusCard
+          title="Failed Cases"
+          value={formatNumber(failedCases)}
+          passed={(failedCases || 0) === 0}
+          icon={<AlertTriangle size={19} />}
         />
       </div>
 
-      <div className="inspection-grid">
-        <DetailCard title="Summary">
-          {Object.entries(report.summary || {}).map(([key, value]) => (
-            <InfoRow key={key} label={toLabel(key)} value={formatUnknown(value)} />
-          ))}
-        </DetailCard>
-
-        <DetailCard title="Readiness Decision">
-          {Object.entries(report.readiness_decision || {}).map(([key, value]) => (
-            <InfoRow key={key} label={toLabel(key)} value={formatUnknown(value)} />
-          ))}
-        </DetailCard>
+      <div className={ready ? "report-callout report-ready" : "report-callout report-needs-review"}>
+        <div>
+          <strong>{ready ? "Ready for demo/release" : "Needs attention"}</strong>
+          <p>{getString(readinessDecision, "recommendation") || "No recommendation returned."}</p>
+        </div>
+        <span>{formatUnknown(readinessDecision.reasons)}</span>
       </div>
 
-      {qualityGate ? (
-        <>
-          <DetailCard title="Aggregate Metrics">
-            <div className="metric-result-grid">
-              {Object.entries(qualityGate.aggregate_metrics || {}).map(
-                ([key, value]) => (
-                  <div className="metric-result-card" key={key}>
-                    <p>{toLabel(key)}</p>
-                    <strong>{formatMetric(value)}</strong>
-                    <span>aggregate metric</span>
-                  </div>
-                )
-              )}
-            </div>
-          </DetailCard>
+      {pipelineName || datasetName ? (
+        <DetailCard title="Report Context">
+          <div className="report-context-grid">
+            <InfoRow label="Dataset" value={datasetName || "—"} />
+            <InfoRow label="Pipeline" value={pipelineName || "—"} />
+            <InfoRow
+              label="Retrieval"
+              value={getString(benchmarkMetadata, "retrieval_provider") || "—"}
+            />
+            <InfoRow
+              label="Rerank"
+              value={formatUnknown(benchmarkMetadata.rerank)}
+            />
+            <InfoRow
+              label="Quality Profile"
+              value={getString(benchmarkMetadata, "quality_gate_profile") || "—"}
+            />
+            <InfoRow
+              label="Generated At"
+              value={report.generated_at || "—"}
+            />
+          </div>
+        </DetailCard>
+      ) : null}
 
-          <DetailCard title={`Quality Gate Checks (${qualityGate.checks.length})`}>
-            <div className="check-list">
-              {qualityGate.checks.map((check) => (
-                <GateCheckCard key={check.gate_id} check={check} />
-              ))}
-            </div>
-          </DetailCard>
-        </>
+      <MetricSection
+        title="Pass / Fail Summary"
+        icon={<BarChart3 size={18} />}
+        metrics={[
+          ["Total Cases", formatNumber(totalCases), "Benchmark cases evaluated"],
+          ["Passed Cases", formatNumber(getNumber(cases, "passed_cases") ?? aggregateMetrics.passed_cases), "Cases that passed"],
+          ["Failed Cases", formatNumber(failedCases), "Cases that failed"],
+          ["Pass Rate", formatPercent(passRate), "Overall benchmark pass rate"],
+          ["Answerable Accuracy", formatPercent(aggregateMetrics.answerable_accuracy), "Answerable case success"],
+          ["Failed Case Rate", formatPercent(getNumber(cases, "failed_case_rate") ?? aggregateMetrics.failed_case_rate), "Lower is better"],
+        ]}
+      />
+
+      <MetricSection
+        title="Retrieval Metrics"
+        icon={<SearchCheck size={18} />}
+        metrics={[
+          ["Recall@k", formatScore(getNumber(benchmarkMetadata, "average_recall_at_k")), "Relevant chunks retrieved"],
+          ["Precision@k", formatScore(getNumber(benchmarkMetadata, "average_precision_at_k")), "Relevant chunk density"],
+          ["MRR", formatScore(getNumber(benchmarkMetadata, "average_mrr")), "First relevant rank quality"],
+          ["nDCG@k", formatScore(getNumber(benchmarkMetadata, "average_ndcg_at_k")), "Ranking quality"],
+        ]}
+      />
+
+      <MetricSection
+        title="Answer Quality"
+        icon={<Gauge size={18} />}
+        metrics={[
+          ["Overall Quality", formatScore(aggregateMetrics.average_overall_quality_score), "Combined quality score"],
+          ["Answer Support", formatScore(aggregateMetrics.average_answer_support_score), "Grounded in retrieved context"],
+          ["Query Relevance", formatScore(aggregateMetrics.average_query_answer_relevance_score), "Directly answers query"],
+          ["Hallucination Risk", formatScore(aggregateMetrics.average_hallucination_risk), "Lower is better"],
+        ]}
+      />
+
+      <MetricSection
+        title="Latency, Cost, and Tokens"
+        icon={<Clock size={18} />}
+        metrics={[
+          ["Average Latency", formatMs(aggregateMetrics.average_latency_ms), "Average run latency"],
+          ["Prompt Tokens", formatNumber(aggregateMetrics.average_prompt_tokens), "Average prompt tokens"],
+          ["Completion Tokens", formatNumber(aggregateMetrics.average_completion_tokens), "Average completion tokens"],
+          ["Total Tokens", formatNumber(aggregateMetrics.average_total_tokens), "Average total tokens"],
+          ["Average Cost", formatCurrency(aggregateMetrics.average_estimated_cost), "Estimated average cost"],
+          ["Total Cost", formatCurrency(aggregateMetrics.total_estimated_cost), "Estimated total cost"],
+        ]}
+      />
+
+      {qualityGate ? (
+        <DetailCard title={`Quality Gate Checks (${qualityGate.checks.length})`}>
+          <div className="quality-gate-summary">
+            <span className={qualityGate.overall_passed ? "badge success" : "badge danger"}>
+              {qualityGate.overall_passed ? "all gates passed" : "gates failed"}
+            </span>
+            <span>
+              {qualityGate.passed_count}/{qualityGate.total_gates} checks passed
+            </span>
+            <span>{formatPercent(qualityGate.pass_rate)} gate pass rate</span>
+          </div>
+
+          <div className="check-list">
+            {qualityGate.checks.map((check) => (
+              <GateCheckCard key={check.gate_id} check={check} />
+            ))}
+          </div>
+        </DetailCard>
       ) : (
         <DetailCard title="Quality Gate Checks">
           <p className="muted-text">No aggregate quality gate result found.</p>
         </DetailCard>
       )}
 
-      <DetailCard title="Report Details">
-        <JsonBlock value={report.details} />
+      <DetailCard title={`Failed Items (${failedItems.length})`}>
+        {failedItems.length > 0 ? (
+          <div className="failed-item-list">
+            {failedItems.map((item, index) => (
+              <FailedItemCard key={index} item={safeRecord(item)} />
+            ))}
+          </div>
+        ) : (
+          <div className="empty-success">
+            <CheckCircle2 size={18} />
+            <span>No failed items. This report is clean.</span>
+          </div>
+        )}
       </DetailCard>
+
+      {Object.keys(failureCategories).length > 0 ? (
+        <DetailCard title="Failure Categories">
+          <div className="report-metric-grid">
+            {Object.entries(failureCategories).map(([key, value]) => (
+              <MetricTile
+                key={key}
+                label={toLabel(key)}
+                value={formatUnknown(value)}
+                hint="Failure category"
+              />
+            ))}
+          </div>
+        </DetailCard>
+      ) : null}
+
+      <details className="report-details-toggle">
+        <summary>Raw report details</summary>
+        <JsonBlock value={details} />
+      </details>
     </>
+  );
+}
+
+function MetricSection({
+  title,
+  icon,
+  metrics,
+}: {
+  title: string;
+  icon: ReactNode;
+  metrics: Array<[string, string, string]>;
+}) {
+  return (
+    <DetailCard title={title}>
+      <div className="report-section-heading">
+        {icon}
+        <span>{title}</span>
+      </div>
+
+      <div className="report-metric-grid">
+        {metrics.map(([label, value, hint]) => (
+          <MetricTile key={label} label={label} value={value} hint={hint} />
+        ))}
+      </div>
+    </DetailCard>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="report-metric-card">
+      <p>{label}</p>
+      <strong>{value}</strong>
+      <span>{hint}</span>
+    </div>
   );
 }
 
@@ -238,6 +414,55 @@ function GateCheckCard({ check }: { check: AggregateQualityGateCheck }) {
       {check.failure_reason ? (
         <p className="check-failure">{check.failure_reason}</p>
       ) : null}
+    </div>
+  );
+}
+
+function FailedItemCard({ item }: { item: Record<string, unknown> }) {
+  const metrics = getRecord(item, "metrics_json");
+
+  return (
+    <div className="failed-item-card">
+      <div className="failed-item-top">
+        <div>
+          <strong>{getString(item, "question") || "Failed benchmark item"}</strong>
+          <p>{getString(item, "failure_reason") || "No failure reason provided."}</p>
+        </div>
+
+        <span className="badge danger">failed</span>
+      </div>
+
+      <div className="failed-answer-box">
+        <span>Actual answer</span>
+        <p>{getString(item, "actual_answer") || "—"}</p>
+      </div>
+
+      <div className="failed-item-metrics">
+        <InfoRow
+          label="Expected Behavior"
+          value={getString(item, "expected_behavior") || "—"}
+        />
+        <InfoRow
+          label="Quality Gate Passed"
+          value={formatUnknown(item.quality_gate_passed)}
+        />
+        <InfoRow
+          label="Response Blocked"
+          value={formatUnknown(item.response_blocked_by_quality_gate)}
+        />
+        <InfoRow
+          label="Overall Quality"
+          value={formatScore(getNumber(metrics, "overall_quality_score"))}
+        />
+        <InfoRow
+          label="Hallucination Risk"
+          value={formatScore(getNumber(metrics, "hallucination_risk"))}
+        />
+        <InfoRow
+          label="Latency"
+          value={formatMs(getNumber(item, "latency_ms"))}
+        />
+      </div>
     </div>
   );
 }
@@ -346,6 +571,37 @@ function summarizeObject(value: Record<string, unknown>): string {
   return `${Object.keys(value).length} fields`;
 }
 
+function safeRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function getRecord(
+  value: Record<string, unknown>,
+  key: string
+): Record<string, unknown> {
+  const nested = value[key];
+
+  return isRecord(nested) ? nested : {};
+}
+
+function getArray(value: Record<string, unknown>, key: string): unknown[] {
+  const nested = value[key];
+
+  return Array.isArray(nested) ? nested : [];
+}
+
+function getString(value: Record<string, unknown>, key: string): string | null {
+  const nested = value[key];
+
+  return typeof nested === "string" ? nested : null;
+}
+
+function getNumber(value: Record<string, unknown>, key: string): number | null {
+  const nested = value[key];
+
+  return typeof nested === "number" ? nested : null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -362,10 +618,44 @@ function formatMetric(value: number | null | undefined) {
   return Number(value).toFixed(4);
 }
 
+function formatNumber(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return Number(value).toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatScore(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return Number(value).toFixed(4);
+}
+
 function formatPercent(value: number | null | undefined) {
   if (value === null || value === undefined) {
     return "—";
   }
 
   return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function formatMs(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return `${Number(value).toFixed(1)} ms`;
+}
+
+function formatCurrency(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  return `$${Number(value).toFixed(4)}`;
 }
