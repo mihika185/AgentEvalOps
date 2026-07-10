@@ -33,6 +33,7 @@ import RagPlayground from "./RagPlayground";
 import DocumentExplorer from "./DocumentExplorer";
 import AgentPlayground from "./AgentPlayground";
 import ExperimentComparison from "./ExperimentComparison";
+import QualityGateManager from "./QualityGateManager";
 
 export default function App() {
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
@@ -122,6 +123,7 @@ export default function App() {
             setSelectedReport(target);
           }}
         />
+        <QualityGateManager />
         <section id="dashboard-overview" className="metric-grid">
         <MetricCard
           label="Documents"
@@ -314,6 +316,10 @@ function SectionNav() {
     {
       href: "#experiment-comparison",
       label: "Compare",
+    },
+    {
+      href: "#quality-gates",
+      label: "Quality Gates",
     },
     {
       href: "#dashboard-overview",
