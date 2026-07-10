@@ -16,6 +16,56 @@ logger = get_logger(__name__)
 
 EVALUATOR_TYPE = "heuristic-rag-evaluator-v2"
 
+QUERY_RELEVANCE_STOPWORDS = {
+    "a",
+    "an",
+    "the",
+    "this",
+    "that",
+    "these",
+    "those",
+    "what",
+    "when",
+    "where",
+    "why",
+    "who",
+    "whom",
+    "which",
+    "how",
+    "long",
+    "much",
+    "many",
+    "do",
+    "does",
+    "did",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "can",
+    "could",
+    "would",
+    "should",
+    "will",
+    "usually",
+    "take",
+    "takes",
+}
+
+TIMELINE_QUERY_PATTERN = re.compile(
+    r"\b(how\s+long|how\s+many\s+(business\s+)?days|timeline|turnaround|duration|when)\b",
+    re.IGNORECASE,
+)
+
+TIME_ANSWER_PATTERN = re.compile(
+    r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+    r".{0,30}\b(seconds?|minutes?|hours?|business\s+days?|days?|weeks?|months?|years?)\b",
+    re.IGNORECASE,
+)
+
 class EvaluationError(Exception):
     pass
 
@@ -193,6 +243,75 @@ def get_citation_accuracy_score(citation_step: Optional[TraceStep]) -> Optional[
 
     return float(output_data.get("citation_accuracy_score", 0.0))
 
+def calculate_query_answer_relevance_score(
+    query: str,
+    answer: str,
+    query_terms: set[str],
+    answer_terms: set[str],
+) -> dict[str, Any]:
+    matched_query_terms = query_terms.intersection(answer_terms)
+    missing_query_terms = query_terms.difference(answer_terms)
+
+    literal_score = (
+        len(matched_query_terms) / len(query_terms)
+        if query_terms
+        else 0.0
+    )
+
+    content_query_terms = {
+        term
+        for term in query_terms
+        if term not in QUERY_RELEVANCE_STOPWORDS
+    }
+
+    matched_content_terms = content_query_terms.intersection(answer_terms)
+    missing_content_terms = content_query_terms.difference(answer_terms)
+
+    content_score = (
+        len(matched_content_terms) / len(content_query_terms)
+        if content_query_terms
+        else literal_score
+    )
+
+    answer_type_score = calculate_answer_type_relevance_score(
+        query=query,
+        answer=answer,
+    )
+
+    final_score = max(
+        literal_score,
+        content_score,
+        answer_type_score,
+    )
+
+    return {
+        "score": final_score,
+        "literal_score": literal_score,
+        "content_score": content_score,
+        "answer_type_score": answer_type_score,
+        "matched_query_terms": matched_query_terms,
+        "missing_query_terms": missing_query_terms,
+        "content_query_terms": content_query_terms,
+        "matched_content_terms": matched_content_terms,
+        "missing_content_terms": missing_content_terms,
+    }
+
+def calculate_answer_type_relevance_score(
+    query: str,
+    answer: str,
+) -> float:
+    if is_timeline_query(query) and has_time_answer(answer):
+        return 1.0
+
+    return 0.0
+
+def is_timeline_query(query: str) -> bool:
+    return bool(TIMELINE_QUERY_PATTERN.search(query))
+
+
+def has_time_answer(answer: str) -> bool:
+    return bool(TIME_ANSWER_PATTERN.search(answer))
+
 def build_metrics(
     query: str,
     answer: str,
@@ -213,13 +332,16 @@ def build_metrics(
     else:
         answer_support_score = 0.0
 
-    matched_query_terms = query_terms.intersection(answer_terms)
-    missing_query_terms = query_terms.difference(answer_terms)
+    relevance_result = calculate_query_answer_relevance_score(
+        query=query,
+        answer=answer,
+        query_terms=query_terms,
+        answer_terms=answer_terms,
+    )
 
-    if query_terms:
-        query_answer_relevance_score = len(matched_query_terms) / len(query_terms)
-    else:
-        query_answer_relevance_score = 0.0
+    matched_query_terms = relevance_result["matched_query_terms"]
+    missing_query_terms = relevance_result["missing_query_terms"]
+    query_answer_relevance_score = relevance_result["score"]
 
     top_retrieval_score = max(retrieved_scores) if retrieved_scores else 0.0
 
@@ -275,9 +397,16 @@ def build_metrics(
             metric_name="query_answer_relevance_score",
             metric_value=round(query_answer_relevance_score, 4),
             details={
+                "definition": "max of literal query overlap, content-term query overlap, and answer-type relevance signals",
+                "literal_score": round(relevance_result["literal_score"], 4),
+                "content_score": round(relevance_result["content_score"], 4),
+                "answer_type_score": round(relevance_result["answer_type_score"], 4),
                 "query_terms": sorted(query_terms),
                 "matched_query_terms": sorted(matched_query_terms),
                 "missing_query_terms": sorted(missing_query_terms),
+                "content_query_terms": sorted(relevance_result["content_query_terms"]),
+                "matched_content_terms": sorted(relevance_result["matched_content_terms"]),
+                "missing_content_terms": sorted(relevance_result["missing_content_terms"]),
                 "answer_terms": sorted(answer_terms),
             },
         ),
