@@ -1,306 +1,299 @@
 # AgentEvalOps Benchmark Report
 
-Generated at: `2026-07-05T19:28:18.889447+00:00`
+## Project
 
-## Scope
+**AgentEvalOps** is an AI reliability platform for evaluating RAG pipelines and tool-calling agents. This report summarizes the current benchmark results for retrieval quality, answer quality, hallucination risk, latency, token usage, agent behavior, and CI-style quality gates.
 
-- Dataset filter: `dataset_c0b9622b9072`
-- Experiment filter: `exp_69df97a7a045`
-- Benchmark runs included: `10`
+The current benchmark is an initial validation benchmark using the **ApexCart Refund Policy Benchmark** dataset.
 
-## Experiment Summary
+---
 
-- Experiment ID: `exp_69df97a7a045`
-- Name: Hybrid reranking experiment
-- Total runs: `7`
-- Completed runs: `7`
-- Failed runs: `0`
-- Average latency: `3113.86 ms`
+## 1. Benchmark Scope
 
-### Runs by Workflow
+### Dataset
 
-| Workflow Type | Count |
+| Field | Value |
+|---|---|
+| Dataset | ApexCart Refund Policy Benchmark |
+| Dataset ID | dataset_33f2264a2f42 |
+| Total test cases | 3 |
+| Answerable cases | 3 |
+| Unanswerable cases | 0 |
+| Expected relevant chunks | Present for retrieval metric computation |
+| Benchmark runner | benchmark-runner-v2 |
+
+### Evaluated Pipelines
+
+| Pipeline | Retrieval Provider | Rerank | Top K | Candidate Multiplier |
+|---|---:|---:|---:|---:|
+| BM25 Baseline | bm25 | false | 3 | 3 |
+| Dense Retrieval | dense | false | 3 | 3 |
+| Hybrid Retrieval | hybrid | false | 3 | 3 |
+| Hybrid Retrieval + Rerank | hybrid | true | 3 | 3 |
+
+### Runtime Configuration
+
+| Component | Value |
+|---|---|
+| Answer generator provider | extractive |
+| Answer generator model | simple-extractive-v1 |
+| Embedding provider | sentence-transformers |
+| Embedding model | sentence-transformers/all-MiniLM-L6-v2 |
+| Quality gate profile | default-v1 |
+
+---
+
+## 2. Pipeline Comparison Results
+
+Latest benchmark comparison:
+
+| Pipeline | Passed Cases | Failed Cases | Pass Rate | Answerable Accuracy | Overall Quality | Hallucination Risk | Avg Latency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| BM25 Baseline | 3/3 | 0 | 100.00% | 100.00% | 0.9993 | 0.0000 | 58.33 ms |
+| Dense Retrieval | 2/3 | 1 | 66.67% | 66.67% | 0.9240 | 0.0000 | 3231.00 ms |
+| Hybrid Retrieval | 3/3 | 0 | 100.00% | 100.00% | 1.0000 | 0.0000 | 76.67 ms |
+| Hybrid Retrieval + Rerank | 3/3 | 0 | 100.00% | 100.00% | 1.0000 | 0.0000 | 918.67 ms |
+
+### Interpretation
+
+BM25, Hybrid Retrieval, and Hybrid Retrieval + Rerank all passed the current benchmark with a 100% pass rate. Dense Retrieval underperformed on this dataset, passing only 2 out of 3 cases.
+
+Hybrid Retrieval + Rerank achieved the strongest reliability profile because it passed all benchmark cases, achieved perfect answer quality on the current dataset, had zero hallucination risk, and passed all aggregate quality gates. It was slower than BM25 and plain Hybrid Retrieval because of reranking overhead.
+
+BM25 performed very well on this small policy benchmark because the questions and source document contain strong lexical overlap. Dense Retrieval was weaker here, which shows why the platform needs empirical benchmark comparison instead of assuming semantic retrieval is always better.
+
+---
+
+## 3. Retrieval Quality Metrics
+
+For cases with expected relevant chunk IDs, the benchmark computes Recall@k, Precision@k, MRR, and nDCG@k.
+
+| Pipeline | Recall@k | Precision@k | MRR | nDCG@k |
+|---|---:|---:|---:|---:|
+| BM25 Baseline | 1.0000 | 0.3333 | 1.0000 | 1.0000 |
+| Dense Retrieval | 1.0000 | 0.3333 | 1.0000 | 1.0000 |
+| Hybrid Retrieval | 1.0000 | 0.3333 | 1.0000 | 1.0000 |
+| Hybrid Retrieval + Rerank | 1.0000 | 0.3333 | 1.0000 | 1.0000 |
+
+### Interpretation
+
+All pipelines retrieved the expected relevant chunk within the top-k results for the latest benchmark run. The Precision@k value is 0.3333 because the benchmark uses top_k=3 and one expected relevant chunk per case. This means the relevant chunk was found, but the retrieved context still includes extra chunks.
+
+The retrieval metrics validate that the benchmark runner is not only checking final answers. It also checks whether the retrieval layer found the expected supporting evidence.
+
+---
+
+## 4. Best Benchmark Run: Hybrid Retrieval + Rerank
+
+| Field | Value |
+|---|---|
+| Benchmark Run ID | benchrun_d941b4e81fa6 |
+| Pipeline | Hybrid Retrieval + Rerank |
+| Status | completed |
+| Passed cases | 3 |
+| Failed cases | 0 |
+| Pass rate | 100.00% |
+| Failed case rate | 0.00% |
+| Answerable accuracy | 100.00% |
+| Average answer support score | 1.0000 |
+| Average query-answer relevance score | 1.0000 |
+| Average hallucination risk | 0.0000 |
+| Average overall quality score | 1.0000 |
+| Average latency | 918.67 ms |
+| Average prompt tokens | 192.00 |
+| Average completion tokens | 37.33 |
+| Average total tokens | 229.33 |
+| Average estimated cost | $0.0000 |
+| Total estimated cost | $0.0000 |
+
+### Readiness Decision
+
+| Field | Value |
+|---|---|
+| Ready | true |
+| Status | ready |
+| Reason | all_release_checks_passed |
+| Recommendation | Ready to proceed to frontend/demo usage. |
+
+The best benchmark run had no failed benchmark items and was marked ready by the aggregate report generator.
+
+---
+
+## 5. Quality Gate Results
+
+The best benchmark run was evaluated using the `default-v1` quality gate profile.
+
+| Gate | Metric | Rule | Actual | Status |
+|---|---|---:|---:|---|
+| Minimum Benchmark Pass Rate | pass_rate | >= 0.8000 | 1.0000 | Passed |
+| Maximum Failed Case Rate | failed_case_rate | <= 0.2000 | 0.0000 | Passed |
+| Minimum Average Overall Quality | average_overall_quality_score | >= 0.7000 | 1.0000 | Passed |
+| Maximum Average Hallucination Risk | average_hallucination_risk | <= 0.2000 | 0.0000 | Passed |
+| Maximum Average Latency | average_latency_ms | <= 15000.0000 | 918.6667 | Passed |
+| Maximum Average Estimated Cost | average_estimated_cost | <= 0.0500 | 0.0000 | Passed |
+
+### Quality Gate Summary
+
+| Field | Value |
 |---|---:|
-| `rag_answer` | 1 |
-| `tool_calling_agent` | 6 |
+| Total gates | 6 |
+| Passed gates | 6 |
+| Failed gates | 0 |
+| Gate pass rate | 100.00% |
+| Overall passed | true |
 
-### Runs by Status
+### Interpretation
 
-| Status | Count |
+The benchmark run passed all release checks. This confirms that the platform can make CI-style pass/fail decisions for AI pipeline changes based on quality, hallucination risk, latency, cost, pass rate, and failed-case rate.
+
+---
+
+## 6. Failure Analysis
+
+### Latest Successful Benchmark Run
+
+| Field | Value |
+|---|---|
+| Failed items | 0 |
+| Failure categories | None |
+
+The latest Hybrid Retrieval + Rerank benchmark run had no failed items.
+
+### Earlier Failed Benchmark Run
+
+An earlier Hybrid Retrieval + Rerank run failed 1 out of 3 cases. Its aggregate quality gate result failed because:
+
+| Failed Gate | Expected | Actual |
+|---|---:|---:|
+| Minimum Benchmark Pass Rate | >= 0.8000 | 0.6667 |
+| Maximum Failed Case Rate | <= 0.2000 | 0.3333 |
+
+This is useful because it demonstrates that the quality gate system can reject a benchmark run even when some individual metrics, such as hallucination risk and latency, look acceptable.
+
+---
+
+## 7. Experiment Report Summary
+
+Experiment: **Hybrid reranking experiment**
+
+| Field | Value |
+|---|---|
+| Experiment ID | exp_69df97a7a045 |
+| Retriever | hybrid |
+| LLM provider | extractive |
+| LLM model | extractive-v1 |
+| Prompt version | v1 |
+| Chunking strategy | boundary-aware |
+| Reranker enabled | true |
+
+### Experiment Run Health
+
+| Metric | Value |
 |---|---:|
-| `completed` | 7 |
+| Total runs | 9 |
+| Completed runs | 9 |
+| Failed runs | 0 |
+| Completed run rate | 100.00% |
+| Failed run rate | 0.00% |
+| Average latency | 5402.11 ms |
+| Average prompt tokens | 274.00 |
+| Average completion tokens | 56.00 |
+| Average total tokens | 330.00 |
+| Total estimated cost | $0.0000 |
 
-### Experiment Metric Highlights
+### Experiment Aggregate Quality Gates
 
-| Evaluator | Metric | Count | Average | Min | Max |
-|---|---|---:|---:|---:|---:|
-| `heuristic-agent-evaluator-v1` | `answer_correctness` | 5 | 1 | 1 | 1 |
-| `heuristic-agent-evaluator-v1` | `overall_agent_score` | 5 | 1 | 1 | 1 |
-| `heuristic-agent-evaluator-v1` | `tool_selection_accuracy` | 5 | 1 | 1 | 1 |
-| `heuristic-rag-evaluator-v1` | `answer_support_score` | 1 | 1 | 1 | 1 |
-| `heuristic-rag-evaluator-v1` | `hallucination_risk` | 1 | 0 | 0 | 0 |
-| `heuristic-rag-evaluator-v1` | `overall_quality_score` | 1 | 0.95 | 0.95 | 0.95 |
-| `heuristic-rag-evaluator-v1` | `query_answer_relevance_score` | 1 | 0.8 | 0.8 | 0.8 |
-| `quality-gate-evaluator-v1` | `quality_gate_overall_pass` | 1 | 1 | 1 | 1 |
-| `quality-gate-evaluator-v1` | `quality_gate_pass_rate` | 1 | 1 | 1 | 1 |
+| Gate | Metric | Rule | Actual | Status |
+|---|---|---:|---:|---|
+| Minimum Completed Run Rate | completed_run_rate | >= 0.9000 | 1.0000 | Passed |
+| Maximum Failed Run Rate | failed_run_rate | <= 0.1000 | 0.0000 | Passed |
+| Minimum Average Overall Quality | average_overall_quality_score | >= 0.7000 | 0.9500 | Passed |
+| Maximum Average Hallucination Risk | average_hallucination_risk | <= 0.2000 | 0.0000 | Passed |
+| Maximum Average Latency | average_latency_ms | <= 15000.0000 | 5402.1111 | Passed |
+| Maximum Average Estimated Cost | average_estimated_cost | <= 0.0500 | 0.0000 | Passed |
 
-## Benchmark Run Summary
+### Experiment Readiness
 
-| Benchmark Run | Pipeline | Status | Cases | Pass Rate | Avg Quality | Avg Latency | Recall@k | Precision@k | MRR | nDCG@k |
-|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `benchrun_33f747cf7a44` | Hybrid Cross-Encoder Rerank top-k-3 | `completed` | 12/12 | 1 | 0.9423 | 370 | 1 | 0.3333 | 1 | 1 |
-| `benchrun_6e7c7f8e1431` | Hybrid Extractive top-k-3 | `completed` | 12/12 | 1 | 0.9333 | 851.9167 | 1 | 0.3333 | 1 | 1 |
-| `benchrun_ca7c8bc180fc` | Hybrid Cross-Encoder Rerank top-k-3 | `completed` | 12/12 | 1 | 0.9423 | 443.6667 | - | - | - | - |
-| `benchrun_9f970f92ef61` | Hybrid Extractive top-k-3 | `completed` | 12/12 | 1 | 0.9333 | 888.9167 | - | - | - | - |
-| `benchrun_9a54fb856029` | Hybrid Extractive top-k-5 | `completed` | 12/12 | 1 | 0.9305 | 106.25 | - | - | - | - |
-| `benchrun_29d3bf1d181d` | BM25 Extractive top-k-5 | `completed` | 12/12 | 1 | 0.9363 | 49.1667 | - | - | - | - |
-| `benchrun_2e74b4c3f74b` | MiniLM Extractive top-k-5 | `completed` | 12/12 | 1 | 0.8592 | 836.5 | - | - | - | - |
-| `benchrun_2cbff58687c3` | Hybrid Extractive top-k-5 | `completed` | 12/12 | 1 | 0.9305 | 91.8333 | - | - | - | - |
-| `benchrun_95ba9caecb95` | BM25 Extractive top-k-5 | `completed` | 12/12 | 1 | 0.9363 | 45.8333 | - | - | - | - |
-| `benchrun_5320b0c1387d` | MiniLM Extractive top-k-5 | `completed` | 12/12 | 1 | 0.8592 | 857.9167 | - | - | - | - |
+| Field | Value |
+|---|---|
+| Ready | true |
+| Status | ready |
+| Reason | all_release_checks_passed |
+| Recommendation | Ready to proceed to frontend/demo usage. |
 
-## Best Benchmark Run
+---
 
-- Benchmark run: `benchrun_33f747cf7a44`
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Pipeline: Hybrid Cross-Encoder Rerank top-k-3
-- Pass rate: `1`
-- Average quality: `0.9423`
-- Average latency: `370 ms`
-- Average recall@k: `1`
-- Average MRR: `1`
-- Average nDCG@k: `1`
+## 8. Agent Evaluation Summary
 
-Selection rule: highest pass rate, then highest average overall quality.
+The experiment report also includes tool-calling agent evaluation metrics.
 
-## Benchmark Run Details
+| Agent Metric | Average |
+|---|---:|
+| Agent eval passed | 1.0000 |
+| Answer correctness | 1.0000 |
+| Max tool call score | 1.0000 |
+| Overall agent score | 1.0000 |
+| Tool call success rate | 1.0000 |
+| Tool efficiency score | 1.0000 |
+| Tool order accuracy | 1.0000 |
+| Tool selection accuracy | 1.0000 |
+| Unnecessary tool call rate | 0.0000 |
 
-### `benchrun_33f747cf7a44` — Hybrid Cross-Encoder Rerank top-k-3
+### Interpretation
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9423`
+The agent evaluation validates that the platform is not limited to RAG. It also evaluates tool-calling behavior, including tool selection, tool call success, tool ordering, final answer correctness, and unnecessary tool usage.
 
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 2605 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.9583 | - | - | 140 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9688 | - | - | 149 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.9 | - | - | 136 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | 1 | 1 | 138 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 127 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 158 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 156 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 199 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 219 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.875 | - | - | 212 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.43 | - | - | 201 | Does ApexCart offer a student discount for annual plans? |
+---
 
-### `benchrun_6e7c7f8e1431` — Hybrid Extractive top-k-3
+## 9. Dashboard-Level System Snapshot
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9333`
+The dashboard currently tracks documents, experiments, RAG runs, benchmark runs, latency, quality, hallucination risk, citation accuracy, and quality gate outcomes.
 
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 9252 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.9083 | - | - | 109 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9472 | - | - | 107 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8817 | - | - | 108 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | 1 | 1 | 78 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 78 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 102 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 65 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 65 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 70 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.5045 | - | - | 103 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.4106 | - | - | 86 | Does ApexCart offer a student discount for annual plans? |
+| Metric | Value |
+|---|---:|
+| Documents | 8 |
+| Experiments | 1 |
+| Runs | 434 |
+| Benchmark runs | 50 |
+| Completed runs | 433 |
+| Failed runs | 1 |
+| Completed run rate | 99.77% |
+| Failed run rate | 0.23% |
+| Average latency | 817.47 ms |
+| Average overall quality score | 0.9344 |
+| Average faithfulness score | 1.0000 |
+| Average hallucination risk | 0.0360 |
+| Average hallucination rate | 0.0750 |
+| Average citation accuracy score | 0.9824 |
+| Average quality gate pass rate | 0.9280 |
 
-### `benchrun_ca7c8bc180fc` — Hybrid Cross-Encoder Rerank top-k-3
+---
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9423`
+## 10. Limitations
 
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 3057 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.9583 | - | - | 335 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9688 | - | - | 179 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.9 | - | - | 176 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 162 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 163 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 226 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 172 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 205 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 165 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.875 | - | - | 245 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.43 | - | - | 239 | Does ApexCart offer a student discount for annual plans? |
+This benchmark is intentionally small and should be treated as an initial validation benchmark, not a large-scale production evaluation.
 
-### `benchrun_9f970f92ef61` — Hybrid Extractive top-k-3
+Current limitations:
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9333`
+1. The benchmark dataset has only 3 cases.
+2. The current benchmark focuses on one refund policy dataset.
+3. The answer generator used in this benchmark is extractive, not a full hosted LLM.
+4. The current report does not claim fine-tuned model training.
+5. More diverse documents and larger evaluation sets are needed before making broad production claims.
 
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 9630 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.9083 | - | - | 167 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9472 | - | - | 108 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8817 | - | - | 109 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 77 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 91 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 126 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 67 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 64 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 66 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.5045 | - | - | 96 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.4106 | - | - | 66 | Does ApexCart offer a student discount for annual plans? |
+---
 
-### `benchrun_9a54fb856029` — Hybrid Extractive top-k-5
+## 11. Conclusion
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9305`
+The current benchmark validates the core AgentEvalOps reliability workflow:
 
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 86 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8683 | - | - | 96 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9555 | - | - | 96 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8859 | - | - | 87 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 96 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 91 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 99 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 98 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 130 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 155 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.8696 | - | - | 126 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.4764 | - | - | 115 | Does ApexCart offer a student discount for annual plans? |
+1. Documents are indexed into searchable chunks.
+2. Multiple retrieval strategies are compared.
+3. RAG answers are evaluated with support, relevance, hallucination, citation, latency, token, and cost metrics.
+4. Benchmark runs produce aggregate reports.
+5. Quality gates convert metrics into release-readiness decisions.
+6. Tool-calling agents are evaluated using agent-specific metrics.
 
-### `benchrun_29d3bf1d181d` — BM25 Extractive top-k-5
+The strongest current configuration is **Hybrid Retrieval + Rerank**, which achieved a 100% pass rate, 1.0000 overall quality score, 0.0000 hallucination risk, and passed all 6 aggregate quality gates on the current benchmark.
 
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9363`
-
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 40 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8983 | - | - | 41 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9688 | - | - | 41 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.9 | - | - | 42 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 49 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 55 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 55 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 50 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 49 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 53 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.875 | - | - | 50 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.44 | - | - | 65 | Does ApexCart offer a student discount for annual plans? |
-
-### `benchrun_2e74b4c3f74b` — MiniLM Extractive top-k-5
-
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.8592`
-
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.8514 | - | - | 8947 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8137 | - | - | 132 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.8932 | - | - | 111 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8291 | - | - | 113 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.8646 | - | - | 81 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.8323 | - | - | 81 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.8163 | - | - | 118 | How long does account deletion take after identity verification? |
-| `PASS` | 0.8913 | - | - | 77 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.8796 | - | - | 75 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 0.9206 | - | - | 90 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.767 | - | - | 112 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.389 | - | - | 101 | Does ApexCart offer a student discount for annual plans? |
-
-### `benchrun_2cbff58687c3` — Hybrid Extractive top-k-5
-
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9305`
-
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 93 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8683 | - | - | 89 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9555 | - | - | 90 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8859 | - | - | 86 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 76 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 82 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 80 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 78 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 82 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 103 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.8696 | - | - | 118 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.4764 | - | - | 125 | Does ApexCart offer a student discount for annual plans? |
-
-### `benchrun_95ba9caecb95` — BM25 Extractive top-k-5
-
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.9363`
-
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.9063 | - | - | 40 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8983 | - | - | 38 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.9688 | - | - | 44 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.9 | - | - | 41 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.95 | - | - | 55 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.9 | - | - | 45 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.9063 | - | - | 46 | How long does account deletion take after identity verification? |
-| `PASS` | 0.9643 | - | - | 41 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.9688 | - | - | 40 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 1 | - | - | 50 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.875 | - | - | 54 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.44 | - | - | 56 | Does ApexCart offer a student discount for annual plans? |
-
-### `benchrun_5320b0c1387d` — MiniLM Extractive top-k-5
-
-- Dataset: `ApexCart Policy Reliability Benchmark`
-- Status: `completed`
-- Cases: `12/12`
-- Pass rate: `1`
-- Average overall quality: `0.8592`
-
-| Result | Quality | Recall | MRR | Latency | Question |
-|---|---:|---:|---:|---:|---|
-| `PASS` | 0.8514 | - | - | 9288 | How long does a customer have to request a refund for a physical product? |
-| `PASS` | 0.8137 | - | - | 121 | When does a monthly subscription cancellation take effect? |
-| `PASS` | 0.8932 | - | - | 104 | How many times will ApexCart retry a failed renewal payment? |
-| `PASS` | 0.8291 | - | - | 107 | What is the usual delivery time for express shipping? |
-| `PASS` | 0.8646 | - | - | 77 | What must customers provide when reporting a damaged product? |
-| `PASS` | 0.8323 | - | - | 78 | What does the hardware accessory warranty exclude? |
-| `PASS` | 0.8163 | - | - | 112 | How long does account deletion take after identity verification? |
-| `PASS` | 0.8913 | - | - | 81 | For how long may ApexCart retain tax and fraud review records? |
-| `PASS` | 0.8796 | - | - | 76 | What happens if a customer files a chargeback before contacting support? |
-| `PASS` | 0.9206 | - | - | 70 | When can a customer request escalation for an unresolved support issue? |
-| `PASS` | 0.767 | - | - | 111 | Does ApexCart accept cryptocurrency payments for subscriptions? |
-| `PASS` | 0.389 | - | - | 70 | Does ApexCart offer a student discount for annual plans? |
+Future work should expand the number and diversity of benchmark cases before claiming large-scale production evaluation.
