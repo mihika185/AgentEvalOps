@@ -87,9 +87,7 @@ Use this explanation:
 
 ```text
 AgentEvalOps is an AI reliability platform for RAG pipelines and tool-calling agents.
-
 Instead of only answering questions from documents, it evaluates whether the answer is grounded, cited, relevant, low-risk, and release-ready.
-
 The system compares retrieval strategies, tracks traces, evaluates hallucination risk, measures latency and token usage, and applies CI-style quality gates before a pipeline is considered ready.
 ```
 
@@ -743,8 +741,6 @@ End with this:
 
 ```text
 The main idea behind AgentEvalOps is that AI outputs should not be trusted just because they sound correct.
-
 They should be traced, evaluated, compared, and gated.
-
 That is what this platform does for RAG pipelines and tool-calling agents.
 ```
