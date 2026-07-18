@@ -7,7 +7,6 @@ from backend.app.evaluation.faithfulness_evaluator import (
     evaluate_faithfulness,
 )
 
-
 LOW_RISK_THRESHOLD = 0.20
 HIGH_RISK_THRESHOLD = 0.50
 
@@ -21,7 +20,6 @@ STOP_WORDS = {
     "company", "document", "documents", "answer", "answers", "question",
 }
 
-
 @dataclass(frozen=True)
 class HallucinationResult:
     hallucination_detected: bool
@@ -33,7 +31,6 @@ class HallucinationResult:
     unsupported_claims: list[str]
     unsupported_terms: list[str]
     reasons: list[str]
-
 
 def detect_hallucination(
     answer: str,
@@ -56,7 +53,6 @@ def detect_hallucination(
     risk_score = max(
         resolved_faithfulness.unsupported_claim_rate,
         unsupported_term_rate,
-        citation_penalty,
     )
 
     risk_score = round(risk_score, 4)
@@ -69,9 +65,6 @@ def detect_hallucination(
 
     if unsupported_term_rate >= LOW_RISK_THRESHOLD:
         reasons.append("answer_terms_not_supported_by_sources")
-
-    if citation_penalty > 0:
-        reasons.append("weak_or_missing_citations")
 
     hallucination_detected = risk_score >= LOW_RISK_THRESHOLD
 
@@ -86,7 +79,6 @@ def detect_hallucination(
         unsupported_terms=unsupported_terms,
         reasons=reasons,
     )
-
 
 def calculate_unsupported_term_rate(
     answer: str,
@@ -104,7 +96,6 @@ def calculate_unsupported_term_rate(
 
     return unsupported_term_rate, unsupported_terms
 
-
 def extract_source_terms(source_chunks: list[Any]) -> set[str]:
     source_terms: set[str] = set()
 
@@ -118,7 +109,6 @@ def extract_source_terms(source_chunks: list[Any]) -> set[str]:
         source_terms.update(extract_keywords(text))
 
     return source_terms
-
 
 def calculate_citation_penalty(citation_accuracy_score: Optional[float]) -> float:
     if citation_accuracy_score is None:
@@ -135,7 +125,6 @@ def calculate_citation_penalty(citation_accuracy_score: Optional[float]) -> floa
 
     return 1.0
 
-
 def classify_risk_level(risk_score: float) -> str:
     if risk_score < LOW_RISK_THRESHOLD:
         return "low"
@@ -144,7 +133,6 @@ def classify_risk_level(risk_score: float) -> str:
         return "medium"
 
     return "high"
-
 
 def extract_keywords(text: str) -> set[str]:
     tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
@@ -162,7 +150,6 @@ def extract_keywords(text: str) -> set[str]:
         keywords.add(normalized_token)
 
     return keywords
-
 
 def normalize_keyword(token: str) -> str:
     synonym_map = {

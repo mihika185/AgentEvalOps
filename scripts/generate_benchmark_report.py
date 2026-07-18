@@ -312,28 +312,40 @@ def build_experiment_report_section(
 
 def build_benchmark_summary_section(
     benchmark_runs: list[BenchmarkRun],
-)->list[str]:
+) -> list[str]:
     lines = [
         "## Benchmark Run Summary",
         "",
-        "| Benchmark Run | Pipeline | Status | Cases | Pass Rate | Avg Quality | Avg Latency | Recall@k | Precision@k | MRR | nDCG@k |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Pipeline | Provider / Model | Cases | Answerable | Unanswerable | Pass Rate | Avg Quality | Avg Hallucination | Avg Latency | Avg Cost | Recall@k | MRR | nDCG@k |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     for run in benchmark_runs:
         metadata = ensure_dict(run.metadata_json)
 
+        provider = metadata.get(
+            "answer_generator_provider",
+            "unknown",
+        )
+
+        model = metadata.get(
+            "answer_generator_model",
+            "unknown",
+        )
+
         lines.append(
             "| "
-            f"`{run.id}` | "
             f"{safe_markdown_text(pipeline_name(run))} | "
-            f"`{run.status}` | "
+            f"`{provider}:{model}` | "
             f"{run.passed_cases}/{run.total_cases} | "
+            f"{run.answerable_passed}/{run.answerable_cases} | "
+            f"{run.unanswerable_passed}/{run.unanswerable_cases} | "
             f"{format_value(pass_rate(run))} | "
             f"{format_value(run.average_overall_quality_score)} | "
-            f"{format_value(run.average_latency_ms)} | "
+            f"{format_value(run.average_hallucination_risk)} | "
+            f"{format_value(run.average_latency_ms)} ms | "
+            f"${format_value(metadata.get('average_estimated_cost'))} | "
             f"{format_value(metadata.get('average_recall_at_k'))} | "
-            f"{format_value(metadata.get('average_precision_at_k'))} | "
             f"{format_value(metadata.get('average_mrr'))} | "
             f"{format_value(metadata.get('average_ndcg_at_k'))} |"
         )
@@ -345,7 +357,7 @@ def build_benchmark_summary_section(
 def build_best_benchmark_run_section(
     best_run: Optional[BenchmarkRun],
     datasets: dict[str, BenchmarkDataset],
-)->list[str]:
+) -> list[str]:
     lines = [
         "## Best Benchmark Run",
         "",
@@ -364,19 +376,85 @@ def build_best_benchmark_run_section(
     dataset = datasets.get(best_run.dataset_id)
     metadata = ensure_dict(best_run.metadata_json)
 
+    provider = metadata.get(
+        "answer_generator_provider",
+        "unknown",
+    )
+
+    model = metadata.get(
+        "answer_generator_model",
+        "unknown",
+    )
+
     lines.extend(
         [
             f"- Benchmark run: `{best_run.id}`",
             f"- Dataset: `{dataset.name if dataset else best_run.dataset_id}`",
             f"- Pipeline: {safe_markdown_text(pipeline_name(best_run))}",
+            f"- Answer generator: `{provider}:{model}`",
+            f"- Passed cases: `{best_run.passed_cases}/{best_run.total_cases}`",
+            (
+                "- Answerable cases: "
+                f"`{best_run.answerable_passed}/{best_run.answerable_cases}`"
+            ),
+            (
+                "- Unanswerable cases: "
+                f"`{best_run.unanswerable_passed}/{best_run.unanswerable_cases}`"
+            ),
             f"- Pass rate: `{format_value(pass_rate(best_run))}`",
-            f"- Average quality: `{format_value(best_run.average_overall_quality_score)}`",
-            f"- Average latency: `{format_value(best_run.average_latency_ms)} ms`",
-            f"- Average recall@k: `{format_value(metadata.get('average_recall_at_k'))}`",
-            f"- Average MRR: `{format_value(metadata.get('average_mrr'))}`",
-            f"- Average nDCG@k: `{format_value(metadata.get('average_ndcg_at_k'))}`",
+            (
+                "- Average answer support: "
+                f"`{format_value(best_run.average_answer_support_score)}`"
+            ),
+            (
+                "- Average query-answer relevance: "
+                f"`{format_value(best_run.average_query_answer_relevance_score)}`"
+            ),
+            (
+                "- Average hallucination risk: "
+                f"`{format_value(best_run.average_hallucination_risk)}`"
+            ),
+            (
+                "- Average overall quality: "
+                f"`{format_value(best_run.average_overall_quality_score)}`"
+            ),
+            (
+                "- Average latency: "
+                f"`{format_value(best_run.average_latency_ms)} ms`"
+            ),
+            (
+                "- Average estimated cost: "
+                f"`${format_value(metadata.get('average_estimated_cost'))}`"
+            ),
+            (
+                "- Total estimated cost: "
+                f"`${format_value(metadata.get('total_estimated_cost'))}`"
+            ),
+            (
+                "- Average total tokens: "
+                f"`{format_value(metadata.get('average_total_tokens'))}`"
+            ),
+            (
+                "- Average Recall@k: "
+                f"`{format_value(metadata.get('average_recall_at_k'))}`"
+            ),
+            (
+                "- Average Precision@k: "
+                f"`{format_value(metadata.get('average_precision_at_k'))}`"
+            ),
+            (
+                "- Average MRR: "
+                f"`{format_value(metadata.get('average_mrr'))}`"
+            ),
+            (
+                "- Average nDCG@k: "
+                f"`{format_value(metadata.get('average_ndcg_at_k'))}`"
+            ),
             "",
-            "Selection rule: highest pass rate, then highest average overall quality.",
+            (
+                "Selection rule: highest pass rate, then highest "
+                "average overall quality."
+            ),
             "",
         ]
     )

@@ -29,7 +29,10 @@ from backend.app.rag.citation_checker import (
     citation_to_dict,
     check_answer_citations,
 )
-from backend.app.rag.llm_answer_generator import get_default_answer_generator
+from backend.app.rag.llm_answer_generator import (
+    LLMAnswerGenerationError,
+    get_default_answer_generator,
+)
 from backend.app.retrieval.retrieval_service import RetrievalError, retrieve_chunks
 
 
@@ -38,7 +41,6 @@ logger = get_logger(__name__)
 
 class RAGWorkflowError(Exception):
     pass
-
 
 @dataclass(frozen=True)
 class ObservableRAGAnswerResult:
@@ -68,7 +70,6 @@ class ObservableRAGAnswerResult:
     quality_gate_pass_rate: float
     failed_quality_gates: list[str]
     response_blocked_by_quality_gate: bool
-
 
 def run_rag_answer_workflow(
     db: Session,
@@ -246,6 +247,10 @@ def run_rag_answer_workflow(
             latency_ms=answer_latency_ms,
         )
 
+        generation_retry_metadata = get_generation_retry_metadata(
+            generator
+        )
+
         record_trace_step(
             db=db,
             run_id=run_id,
@@ -261,6 +266,7 @@ def run_rag_answer_workflow(
                 "answer": answer,
                 "answer_length": len(answer),
                 "token_usage": generation_usage.to_metadata(),
+                "retry_metadata": generation_retry_metadata,
             },
             latency_ms=answer_latency_ms,
         )
@@ -305,6 +311,7 @@ def run_rag_answer_workflow(
                 "estimated_cost": generation_usage.estimated_cost,
                 "token_usage_source": generation_usage.token_usage_source,
                 "token_usage": generation_usage.to_metadata(),
+                "answer_generation_retry": generation_retry_metadata,
                 "citation_check_latency_ms": citation_latency_ms,
                 "citation_check_passed": citation_check.citation_check_passed,
                 "citation_accuracy_score": citation_check.citation_accuracy_score,
@@ -469,6 +476,7 @@ def run_rag_answer_workflow(
                 "estimated_cost": generation_usage.estimated_cost,
                 "token_usage_source": generation_usage.token_usage_source,
                 "token_usage": generation_usage.to_metadata(),
+                "answer_generation_retry": generation_retry_metadata,
                 "citation_check_latency_ms": citation_latency_ms,
                 "evaluation_latency_ms": evaluation_latency_ms,
                 "quality_gate_latency_ms": quality_gate_latency_ms,
@@ -531,7 +539,12 @@ def run_rag_answer_workflow(
             reranker_name=retrieval_result.reranker_name,
         )
 
-    except (RetrievalError, RunRecorderError, QualityGateError) as exc:
+    except (
+        RetrievalError,
+        RunRecorderError,
+        QualityGateError,
+        LLMAnswerGenerationError,
+    ) as exc:
         mark_run_failed_safely(
             db=db,
             run_id=run_id,
@@ -555,7 +568,6 @@ def run_rag_answer_workflow(
         )
 
         raise RAGWorkflowError("Failed to run RAG answer workflow") from exc
-
 
 def record_citation_trace_step(
     db: Session,
@@ -588,6 +600,24 @@ def record_citation_trace_step(
         latency_ms=latency_ms,
     )
 
+def get_generation_retry_metadata(
+    generator: AnswerGenerator,
+) -> dict[str, object]:
+    return {
+        "retry_count": int(
+            getattr(generator, "last_retry_count", 0) or 0
+        ),
+        "retry_delays_seconds": list(
+            getattr(
+                generator,
+                "last_retry_delays_seconds",
+                [],
+            ) or []
+        ),
+        "retry_reasons": list(
+            getattr(generator, "last_retry_reasons", []) or []
+        ),
+    }
 
 def normalize_retrieval_provider(provider: str) -> str:
     cleaned_provider = provider.strip().lower()
@@ -603,10 +633,8 @@ def normalize_retrieval_provider(provider: str) -> str:
 
     raise RAGWorkflowError(f"Unsupported retrieval provider: {provider}")
 
-
 def elapsed_ms(start_time: float) -> int:
     return int((time.perf_counter() - start_time) * 1000)
-
 
 def mark_run_failed_safely(
     db: Session,
@@ -626,7 +654,6 @@ def mark_run_failed_safely(
         )
     except Exception:
         logger.exception("Failed to mark run as failed: %s", run_id)
-
 
 def build_quality_gate_fallback_answer() -> str:
     return (

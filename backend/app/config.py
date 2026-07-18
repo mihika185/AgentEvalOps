@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -51,6 +52,23 @@ class Settings(BaseSettings):
 
     groq_input_cost_per_1k_tokens: float = 0.0
     groq_output_cost_per_1k_tokens: float = 0.0
+
+    groq_max_retries: int = Field(default=3, ge=0, le=10)
+    groq_retry_base_seconds: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=60.0,
+    )
+    groq_retry_max_seconds: float = Field(
+        default=15.0,
+        ge=0.1,
+        le=120.0,
+    )
+    groq_retry_jitter_seconds: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=5.0,
+    )
 
     openai_input_cost_per_1k_tokens: float = 0.0
     openai_output_cost_per_1k_tokens: float = 0.0

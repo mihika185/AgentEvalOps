@@ -4,7 +4,6 @@ from typing import Any, Optional
 
 from backend.app.config import settings
 
-
 @dataclass(frozen=True)
 class GenerationUsage:
     provider: str
@@ -31,7 +30,6 @@ class GenerationUsage:
             "token_usage_source": self.token_usage_source,
             "latency_ms": self.latency_ms,
         }
-
 
 def track_answer_generation_usage(
     generator: Any,
@@ -82,7 +80,6 @@ def track_answer_generation_usage(
         latency_ms=max(int(latency_ms), 0),
     )
 
-
 def get_provider_usage(generator: Any) -> Optional[dict[str, int]]:
     raw_usage = getattr(generator, "last_usage", None)
 
@@ -100,7 +97,6 @@ def get_provider_usage(generator: Any) -> Optional[dict[str, int]]:
         "completion_tokens": max(completion_tokens, 0),
     }
 
-
 def get_int_value(data: dict[str, Any], key: str) -> Optional[int]:
     value = data.get(key)
 
@@ -111,7 +107,6 @@ def get_int_value(data: dict[str, Any], key: str) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
-
 
 def parse_generator_name(generator_name: str) -> tuple[str, str]:
     cleaned_name = str(generator_name or "").strip()
@@ -127,7 +122,6 @@ def parse_generator_name(generator_name: str) -> tuple[str, str]:
         return "extractive", cleaned_name
 
     return "unknown", cleaned_name
-
 
 def estimate_prompt_tokens(query: str, source_chunks: list[Any]) -> int:
     prompt_parts = [
@@ -161,7 +155,6 @@ def estimate_prompt_tokens(query: str, source_chunks: list[Any]) -> int:
 
     return estimate_token_count("\n".join(prompt_parts))
 
-
 def estimate_token_count(text: str) -> int:
     cleaned_text = str(text or "").strip()
 
@@ -172,9 +165,18 @@ def estimate_token_count(text: str) -> int:
 
     return max(1, math.ceil(len(cleaned_text) / chars_per_token))
 
-
 def get_provider_cost_rates(provider: str) -> tuple[float, float]:
     normalized_provider = provider.strip().lower()
+
+    free_local_providers = {
+        "extractive",
+        "mock",
+        "simple",
+        "unknown",
+    }
+
+    if normalized_provider in free_local_providers:
+        return 0.0, 0.0
 
     if normalized_provider == "groq":
         return (
@@ -192,7 +194,6 @@ def get_provider_cost_rates(provider: str) -> tuple[float, float]:
         settings.default_input_cost_per_1k_tokens,
         settings.default_output_cost_per_1k_tokens,
     )
-
 
 def calculate_estimated_cost(
     prompt_tokens: int,

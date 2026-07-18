@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -19,7 +20,16 @@ from backend.app.database.models import(
     PipelineConfig,
     utc_now,
 )
-from backend.app.rag.answer_service import SimpleExtractiveAnswerGenerator
+from backend.app.config import settings
+from backend.app.rag.answer_service import AnswerGenerator
+from backend.app.rag.llm_answer_generator import (
+    LLMAnswerGenerationError,
+    create_answer_generator,
+    get_configured_answer_model,
+    get_configured_answer_provider,
+    normalize_answer_provider,
+    resolve_answer_model,
+)
 from backend.app.rag.workflow_service import RAGWorkflowError, run_rag_answer_workflow
 from backend.app.evaluation.experiment_quality_gates import (
     AggregateQualityGateError,
@@ -295,20 +305,109 @@ def validate_test_case_payload(
             detail="Answerable test cases need at least one expected keyword"
         )
 
+@dataclass(frozen=True)
+class BenchmarkRuntimeConfig:
+    quality_gate_profile: str
+    retrieval_provider: str
+    answer_generator_provider: str
+    answer_generator_model: str
+    embedding_provider: str
+    embedding_model: str
+    rerank: bool
+    candidate_multiplier: int
+    answer_generator: AnswerGenerator
+
 def answer_generator_from_pipeline_config(
     pipeline_config: PipelineConfig
-):
-    provider = pipeline_config.answer_generator_provider.strip().lower()
-
-    if provider == "extractive":
-        return SimpleExtractiveAnswerGenerator()
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            f"Unsupported answer_generator_provider "
-            f"'{pipeline_config.answer_generator_provider}' for benchmark comparison"
+) -> AnswerGenerator:
+    try:
+        answer_provider = normalize_answer_provider(
+            pipeline_config.answer_generator_provider
         )
+        answer_model = resolve_answer_model(
+            provider_name=answer_provider,
+            model_name=pipeline_config.answer_generator_model,
+        )
+    except LLMAnswerGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    try:
+        return create_answer_generator(
+            provider_name=answer_provider,
+            model_name=answer_model,
+        )
+    except LLMAnswerGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+def resolve_benchmark_runtime(
+    pipeline_config: Optional[PipelineConfig],
+) -> BenchmarkRuntimeConfig:
+    if pipeline_config is None:
+        try:
+            answer_provider = get_configured_answer_provider()
+            answer_model = get_configured_answer_model()
+            answer_generator = create_answer_generator(
+                provider_name=answer_provider,
+                model_name=answer_model,
+            )
+        except LLMAnswerGenerationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(exc),
+            ) from exc
+
+        return BenchmarkRuntimeConfig(
+            quality_gate_profile=DEFAULT_QUALITY_GATE_PROFILE,
+            retrieval_provider="dense",
+            answer_generator_provider=answer_provider,
+            answer_generator_model=answer_model,
+            embedding_provider=settings.default_embedding_provider,
+            embedding_model=settings.default_embedding_model,
+            rerank=False,
+            candidate_multiplier=3,
+            answer_generator=answer_generator,
+        )
+
+    try:
+        answer_provider = normalize_answer_provider(
+            pipeline_config.answer_generator_provider
+        )
+        answer_model = resolve_answer_model(
+            provider_name=answer_provider,
+            model_name=pipeline_config.answer_generator_model,
+        )
+    except LLMAnswerGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return BenchmarkRuntimeConfig(
+        quality_gate_profile=pipeline_config.quality_gate_profile,
+        retrieval_provider=pipeline_config.retrieval_provider,
+        answer_generator_provider=answer_provider,
+        answer_generator_model=answer_model,
+        embedding_provider=pipeline_config.embedding_provider,
+        embedding_model=pipeline_config.embedding_model,
+        rerank=metadata_bool_value(
+            metadata=pipeline_config.metadata_json,
+            key="rerank",
+            default=False,
+        ),
+        candidate_multiplier=metadata_int_value(
+            metadata=pipeline_config.metadata_json,
+            key="candidate_multiplier",
+            default=3,
+            minimum=1,
+            maximum=10,
+        ),
+        answer_generator=answer_generator_from_pipeline_config(pipeline_config),
     )
 
 def metadata_bool_value(
@@ -372,52 +471,27 @@ def execute_benchmark_run(
     top_k: int,
     pipeline_config: Optional[PipelineConfig] = None
 ) -> tuple[BenchmarkRun, list[BenchmarkRunItem]]:
-    resolved_quality_gate_profile = DEFAULT_QUALITY_GATE_PROFILE
-    resolved_retrieval_provider = "dense"
-    resolved_rerank = False
-    resolved_candidate_multiplier = 3
+    runtime = resolve_benchmark_runtime(pipeline_config)
 
     benchmark_metadata = {
         "dataset_name": dataset.name,
         "top_k": top_k,
-        "retrieval_provider": resolved_retrieval_provider,
-        "rerank": resolved_rerank,
-        "candidate_multiplier": resolved_candidate_multiplier,
-        "quality_gate_profile": resolved_quality_gate_profile,
-        "runner_version": "benchmark-runner-v2"
+        "retrieval_provider": runtime.retrieval_provider,
+        "answer_generator_provider": runtime.answer_generator_provider,
+        "answer_generator_model": runtime.answer_generator_model,
+        "embedding_provider": runtime.embedding_provider,
+        "embedding_model": runtime.embedding_model,
+        "rerank": runtime.rerank,
+        "candidate_multiplier": runtime.candidate_multiplier,
+        "quality_gate_profile": runtime.quality_gate_profile,
+        "runner_version": "benchmark-runner-v3-configured-llm",
     }
 
-    answer_generator = None
-
     if pipeline_config is not None:
-        resolved_quality_gate_profile = pipeline_config.quality_gate_profile
-        resolved_retrieval_provider = pipeline_config.retrieval_provider
-        resolved_rerank = metadata_bool_value(
-            metadata=pipeline_config.metadata_json,
-            key="rerank",
-            default=False,
-        )
-        resolved_candidate_multiplier = metadata_int_value(
-            metadata=pipeline_config.metadata_json,
-            key="candidate_multiplier",
-            default=3,
-            minimum=1,
-            maximum=10,
-        )
-        answer_generator = answer_generator_from_pipeline_config(pipeline_config)
-
         benchmark_metadata = {
             **benchmark_metadata,
             "pipeline_config_id": pipeline_config.id,
             "pipeline_config_name": pipeline_config.name,
-            "retrieval_provider": pipeline_config.retrieval_provider,
-            "answer_generator_provider": pipeline_config.answer_generator_provider,
-            "answer_generator_model": pipeline_config.answer_generator_model,
-            "embedding_provider": pipeline_config.embedding_provider,
-            "embedding_model": pipeline_config.embedding_model,
-            "quality_gate_profile": pipeline_config.quality_gate_profile,
-            "rerank": resolved_rerank,
-            "candidate_multiplier": resolved_candidate_multiplier,
             "reranker_settings_source": "pipeline_config.metadata_json",
         }
 
@@ -441,11 +515,11 @@ def execute_benchmark_run(
                 query=test_case.question,
                 top_k=top_k,
                 document_id=test_case.document_id or dataset.document_id,
-                retrieval_provider=resolved_retrieval_provider,
-                answer_generator=answer_generator,
-                quality_gate_profile=resolved_quality_gate_profile,
-                rerank=resolved_rerank,
-                candidate_multiplier=resolved_candidate_multiplier,
+                retrieval_provider=runtime.retrieval_provider,
+                answer_generator=runtime.answer_generator,
+                quality_gate_profile=runtime.quality_gate_profile,
+                rerank=runtime.rerank,
+                candidate_multiplier=runtime.candidate_multiplier,
             )
 
             metrics = to_metrics_dict(result)
@@ -491,9 +565,12 @@ def execute_benchmark_run(
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
                     "retrieval_provider": result.retrieval_provider,
+                    "answer_generator": result.answer_generator,
+                    "answer_generator_provider": runtime.answer_generator_provider,
+                    "answer_generator_model": runtime.answer_generator_model,
                     "quality_gate_profile": result.quality_gate_profile,
-                    "rerank": resolved_rerank,
-                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "rerank": runtime.rerank,
+                    "candidate_multiplier": runtime.candidate_multiplier,
                     "retrieved_chunk_count": result.retrieved_chunk_count,
                     "reranker_used": result.reranker_used,
                     "reranker_name": result.reranker_name,
@@ -528,11 +605,13 @@ def execute_benchmark_run(
                     "tags": test_case.tags,
                     "pipeline_config_id": pipeline_config.id if pipeline_config else None,
                     "pipeline_config_name": pipeline_config.name if pipeline_config else None,
-                    "retrieval_provider": resolved_retrieval_provider,
+                    "retrieval_provider": runtime.retrieval_provider,
+                    "answer_generator_provider": runtime.answer_generator_provider,
+                    "answer_generator_model": runtime.answer_generator_model,
                     "error_type": "RAGWorkflowError",
-                    "quality_gate_profile": resolved_quality_gate_profile,
-                    "rerank": resolved_rerank,
-                    "candidate_multiplier": resolved_candidate_multiplier,
+                    "quality_gate_profile": runtime.quality_gate_profile,
+                    "rerank": runtime.rerank,
+                    "candidate_multiplier": runtime.candidate_multiplier,
                     "reranker_used": False,
                     "reranker_name": None,
                 }

@@ -51,3 +51,7 @@ docker-data/
 .qdrant/
 postgres-data/
 redis-data/
+
+benchmark_run_output*.txt
+benchmark_*analysis.json
+benchmark_*diagnostics.json

@@ -13,7 +13,6 @@ def make_chunk(chunk_id: str, text: str):
         chunk_text=text,
     )
 
-
 def test_extract_claims_splits_answer_into_claims():
     claims = extract_claims(
         "Customers must report damage within 48 hours. Refunds depend on inspection."
@@ -23,7 +22,6 @@ def test_extract_claims_splits_answer_into_claims():
         "Customers must report damage within 48 hours.",
         "Refunds depend on inspection.",
     ]
-
 
 def test_faithfulness_passes_when_claims_are_supported():
     result = evaluate_faithfulness(
@@ -45,7 +43,6 @@ def test_faithfulness_passes_when_claims_are_supported():
     assert result.faithfulness_score == 1.0
     assert result.unsupported_claim_count == 0
     assert len(result.supported_claims) == 2
-
 
 def test_faithfulness_detects_unsupported_claim():
     result = evaluate_faithfulness(
@@ -123,3 +120,30 @@ def test_hallucination_detector_flags_unsupported_claim():
     assert result.hallucination_risk_score >= 0.5
     assert result.risk_level == "high"
     assert "unsupported_claims_detected" in result.reasons
+
+def test_supported_answer_is_not_hallucination_when_citation_score_is_moderate():
+    chunks = [
+        make_chunk(
+            "chunk_1",
+            (
+                "ApexCart retries a failed renewal payment up to 3 times "
+                "within 7 calendar days before suspending subscription benefits."
+            ),
+        )
+    ]
+
+    answer = (
+        "ApexCart will retry a failed renewal payment up to 3 times within "
+        "7 calendar days before suspending subscription benefits."
+    )
+
+    result = detect_hallucination(
+        answer=answer,
+        source_chunks=chunks,
+        citation_accuracy_score=0.625,
+    )
+
+    assert result.hallucination_detected is False
+    assert result.hallucination_risk_score == 0.0
+    assert result.citation_penalty == 0.25
+    assert "weak_or_missing_citations" not in result.reasons

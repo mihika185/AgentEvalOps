@@ -5,6 +5,7 @@ from backend.app.evaluation.cost_latency_tracker import (
     estimate_token_count,
     track_answer_generation_usage,
 )
+from backend.app.config import settings
 
 class FakeGenerator:
     generator_name = "extractive:simple-extractive-v2"
@@ -67,6 +68,23 @@ def test_track_answer_generation_usage_uses_provider_usage_when_available():
     assert usage.completion_tokens == 25
     assert usage.total_tokens == 125
     assert usage.token_usage_source == "provider_usage"
+
+def test_track_answer_generation_usage_applies_configured_groq_rates(monkeypatch):
+    monkeypatch.setattr(settings, "groq_input_cost_per_1k_tokens", 0.00059)
+    monkeypatch.setattr(settings, "groq_output_cost_per_1k_tokens", 0.00079)
+
+    usage = track_answer_generation_usage(
+        generator=FakeProviderUsageGenerator(),
+        generator_name=FakeProviderUsageGenerator.generator_name,
+        query="Question",
+        source_chunks=[],
+        answer="Answer",
+        latency_ms=20,
+    )
+
+    assert usage.input_cost_per_1k_tokens == 0.00059
+    assert usage.output_cost_per_1k_tokens == 0.00079
+    assert usage.estimated_cost == 0.00007875
 
 def test_calculate_estimated_cost_uses_input_and_output_rates():
     cost = calculate_estimated_cost(

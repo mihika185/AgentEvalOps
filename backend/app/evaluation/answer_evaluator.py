@@ -14,7 +14,7 @@ from backend.app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-EVALUATOR_TYPE = "heuristic-rag-evaluator-v2"
+EVALUATOR_TYPE = "heuristic-rag-evaluator-v3"
 
 QUERY_RELEVANCE_STOPWORDS = {
     "a",
@@ -65,6 +65,29 @@ TIME_ANSWER_PATTERN = re.compile(
     r".{0,30}\b(seconds?|minutes?|hours?|business\s+days?|days?|weeks?|months?|years?)\b",
     re.IGNORECASE,
 )
+
+EXCLUSION_QUERY_PATTERN = re.compile(
+    r"\b(exclude|excludes|excluded|exclusion|not\s+cover|not\s+covered)\b",
+    re.IGNORECASE,
+)
+
+EXCLUSION_ANSWER_PATTERN = re.compile(
+    r"\b(exclude|excludes|excluded|exclusion|not\s+cover|not\s+covered)\b",
+    re.IGNORECASE,
+)
+
+ANSWER_TYPE_INTENT_TERMS = {
+    "cover",
+    "day",
+    "hour",
+    "week",
+    "month",
+    "year",
+    "time",
+    "timeline",
+    "turnaround",
+    "duration",
+}
 
 class EvaluationError(Exception):
     pass
@@ -276,6 +299,8 @@ def calculate_query_answer_relevance_score(
     answer_type_score = calculate_answer_type_relevance_score(
         query=query,
         answer=answer,
+        content_query_terms=content_query_terms,
+        answer_terms=answer_terms,
     )
 
     final_score = max(
@@ -299,11 +324,48 @@ def calculate_query_answer_relevance_score(
 def calculate_answer_type_relevance_score(
     query: str,
     answer: str,
+    content_query_terms: set[str],
+    answer_terms: set[str],
 ) -> float:
-    if is_timeline_query(query) and has_time_answer(answer):
-        return 1.0
+    subject_query_terms = content_query_terms.difference(
+        ANSWER_TYPE_INTENT_TERMS
+    )
 
-    return 0.0
+    matched_subject_terms = subject_query_terms.intersection(answer_terms)
+
+    subject_overlap_score = (
+        len(matched_subject_terms) / len(subject_query_terms)
+        if subject_query_terms
+        else 1.0
+    )
+
+    answer_type_matches = (
+        is_timeline_query(query)
+        and has_time_answer(answer)
+    ) or (
+        is_exclusion_query(query)
+        and has_exclusion_answer(answer)
+    )
+
+    if not answer_type_matches:
+        return 0.0
+
+    if subject_query_terms and not matched_subject_terms:
+        return 0.0
+
+    return round(0.60 + 0.40 * subject_overlap_score, 4)
+
+def is_timeline_query(query: str) -> bool:
+    return bool(TIMELINE_QUERY_PATTERN.search(query))
+
+def has_time_answer(answer: str) -> bool:
+    return bool(TIME_ANSWER_PATTERN.search(answer))
+
+def is_exclusion_query(query: str) -> bool:
+    return bool(EXCLUSION_QUERY_PATTERN.search(query))
+
+def has_exclusion_answer(answer: str) -> bool:
+    return bool(EXCLUSION_ANSWER_PATTERN.search(answer))
 
 def is_timeline_query(query: str) -> bool:
     return bool(TIMELINE_QUERY_PATTERN.search(query))
@@ -397,7 +459,10 @@ def build_metrics(
             metric_name="query_answer_relevance_score",
             metric_value=round(query_answer_relevance_score, 4),
             details={
-                "definition": "max of literal query overlap, content-term query overlap, and answer-type relevance signals",
+                "definition": (
+                    "max of unsupported claim rate and unsupported term rate; "
+                    "citation quality is reported separately"
+                ),
                 "literal_score": round(relevance_result["literal_score"], 4),
                 "content_score": round(relevance_result["content_score"], 4),
                 "answer_type_score": round(relevance_result["answer_type_score"], 4),
@@ -408,6 +473,7 @@ def build_metrics(
                 "matched_content_terms": sorted(relevance_result["matched_content_terms"]),
                 "missing_content_terms": sorted(relevance_result["missing_content_terms"]),
                 "answer_terms": sorted(answer_terms),
+                "citation_penalty": hallucination_result.citation_penalty,
             },
         ),
         MetricResult(

@@ -5,8 +5,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.app.config import settings
 from backend.app.database.connection import get_db
 from backend.app.database.models import PipelineConfig
+from backend.app.rag.llm_answer_generator import (
+    LLMAnswerGenerationError,
+    get_configured_answer_model as resolve_configured_answer_model,
+    get_configured_answer_provider as resolve_configured_answer_provider,
+)
 
 
 router = APIRouter(
@@ -18,6 +24,30 @@ AnswerGeneratorProvider = Literal["extractive", "groq"]
 RetrievalProvider = Literal["dense", "bm25", "hybrid"]
 QualityGateProfile = Literal["default-v1", "strict-v1", "lenient-v1"]
 
+def get_configured_answer_provider() -> AnswerGeneratorProvider:
+    try:
+        return resolve_configured_answer_provider()
+    except LLMAnswerGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+def get_configured_answer_model() -> str:
+    try:
+        return resolve_configured_answer_model()
+    except LLMAnswerGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+def get_configured_embedding_provider() -> str:
+    return settings.default_embedding_provider.strip()
+
+def get_configured_embedding_model() -> str:
+    return settings.default_embedding_model.strip()
+
 class PipelineConfigCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
@@ -25,11 +55,19 @@ class PipelineConfigCreateRequest(BaseModel):
     retrieval_provider: RetrievalProvider = "hybrid"
     top_k: int = Field(default=3, ge=1, le=20)
 
-    answer_generator_provider: AnswerGeneratorProvider = "extractive"
-    answer_generator_model: str = "simple-extractive-v1"
+    answer_generator_provider: AnswerGeneratorProvider = Field(
+        default_factory=get_configured_answer_provider
+    )
+    answer_generator_model: str = Field(
+        default_factory=get_configured_answer_model
+    )
 
-    embedding_provider: str = "sentence-transformers"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_provider: str = Field(
+        default_factory=get_configured_embedding_provider
+    )
+    embedding_model: str = Field(
+        default_factory=get_configured_embedding_model
+    )
 
     quality_gate_profile: QualityGateProfile = "default-v1"
     is_active: bool = True
@@ -110,6 +148,7 @@ class PipelineConfigResponse(BaseModel):
 
 class DefaultPipelineConfigsCreateResponse(BaseModel):
     created_count: int
+    updated_count: int
     configs: list[PipelineConfigResponse]
 
 def get_pipeline_config_or_404(
@@ -134,6 +173,11 @@ def get_pipeline_config_or_404(
 def create_default_pipeline_configs(
     db: Annotated[Session, Depends(get_db)],
 ):
+    answer_provider = get_configured_answer_provider()
+    answer_model = get_configured_answer_model()
+    embedding_provider = get_configured_embedding_provider()
+    embedding_model = get_configured_embedding_model()
+
     default_configs = [
         {
             "name": "BM25 Baseline",
@@ -182,6 +226,7 @@ def create_default_pipeline_configs(
     ]
 
     created_count = 0
+    updated_count = 0
 
     for config_payload in default_configs:
         existing_config = db.execute(
@@ -190,6 +235,17 @@ def create_default_pipeline_configs(
         ).scalar_one_or_none()
 
         if existing_config is not None:
+            existing_config.description = config_payload["description"]
+            existing_config.retrieval_provider = config_payload["retrieval_provider"]
+            existing_config.top_k = config_payload["top_k"]
+            existing_config.answer_generator_provider = answer_provider
+            existing_config.answer_generator_model = answer_model
+            existing_config.embedding_provider = embedding_provider
+            existing_config.embedding_model = embedding_model
+            existing_config.quality_gate_profile = "default-v1"
+            existing_config.is_active = True
+            existing_config.metadata_json = config_payload["metadata_json"]
+            updated_count += 1
             continue
 
         pipeline_config = PipelineConfig(
@@ -197,10 +253,10 @@ def create_default_pipeline_configs(
             description=config_payload["description"],
             retrieval_provider=config_payload["retrieval_provider"],
             top_k=config_payload["top_k"],
-            answer_generator_provider="extractive",
-            answer_generator_model="simple-extractive-v1",
-            embedding_provider="sentence-transformers",
-            embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+            answer_generator_provider=answer_provider,
+            answer_generator_model=answer_model,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
             quality_gate_profile="default-v1",
             is_active=True,
             metadata_json=config_payload["metadata_json"],
@@ -223,6 +279,7 @@ def create_default_pipeline_configs(
 
     return DefaultPipelineConfigsCreateResponse(
         created_count=created_count,
+        updated_count=updated_count,
         configs=[
             to_pipeline_config_response(config)
             for config in configs
